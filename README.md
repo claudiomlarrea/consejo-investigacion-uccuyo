@@ -1,13 +1,15 @@
 # Consejo de Investigación · UCCuyo
 
-Sistema nuevo de carga de temas y Orden del Día. Usa la **misma planilla** que el sistema anterior. No lo reemplaza ni lo apaga.
+Sitio del Consejo. Misma planilla que Streamlit; **solo agrega filas**. El sistema de Streamlit no se toca.
 
-## Publicar en Streamlit Cloud
+## Publicar en Vercel (Hobby, sin tarjeta)
 
-1. Este repo en GitHub.
-2. En [share.streamlit.io](https://share.streamlit.io) → **Sign in with GitHub**.
-3. **New app** → este repositorio → archivo `streamlit_app.py`.
-4. **Advanced settings → Secrets**: el mismo JSON `[gcp_service_account]` del sistema viejo.
-5. Deploy.
+1. Entrá a [vercel.com](https://vercel.com) con GitHub o email. El plan Hobby no pide tarjeta.
+2. New Project → Importá esta carpeta (`prototipo`) o el repo del sitio.
+3. Framework: **FastAPI**. Deploy.
 
-El sistema anterior sigue en su URL. Este tiene otra.
+Para leer y escribir la planilla real, en Vercel → Settings → Environment Variables:
+
+- `GOOGLE_SA_JSON` = el JSON de la cuenta de servicio (el mismo `gcp_service_account` de Streamlit Cloud), en una sola línea.
+
+Sin esa variable el sitio igual abre y muestra los temas ya cacheados.

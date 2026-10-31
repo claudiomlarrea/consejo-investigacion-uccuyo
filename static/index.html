@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Consejo de Investigación · UCCuyo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css?v=18">
+  <style>.hero-copy{opacity:0;transform:translate3d(-36vw,0,0)}</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#inicio">
+        <img class="brand-logo" src="/static/logo-uccuyo.png" width="56" height="56" alt="Universidad Católica de Cuyo">
+        <span class="brand-text">
+          <strong>Consejo de Investigación</strong>
+          <small>Secretaría de Investigación</small>
+        </span>
+      </a>
+      <p class="topbar-title">Universidad Católica de Cuyo</p>
+      <span class="topbar-spacer" aria-hidden="true"></span>
+    </div>
+    <nav class="menu" aria-label="Secciones">
+      <div class="menu-inner">
+        <a class="menu-link" href="#inicio" data-go="inicio">Inicio</a>
+
+        <div class="drop">
+          <button type="button" class="menu-link" data-go="acta">Actas</button>
+          <div class="drop-panel drop-scroll" id="menu-actas"></div>
+        </div>
+
+        <a class="menu-link" href="#cargar" data-go="cargar">Cargar tema</a>
+
+        <div class="drop">
+          <button type="button" class="menu-link" data-go="od">Orden del Día</button>
+          <div class="drop-panel drop-scroll" id="menu-od"></div>
+        </div>
+
+        <div class="drop">
+          <button type="button" class="menu-link" data-go="archivos">Carga de archivos</button>
+          <div class="drop-panel drop-scroll" id="menu-archivos"></div>
+        </div>
+
+        <a
+          class="menu-link"
+          href="https://claudiomlarrea.github.io/secretaria-investigacion/#tablero-investigacion"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Estadísticas de actividades</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section id="inicio" class="page is-on">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="hero-kicker">Universidad Católica de Cuyo</p>
+          <h1>Consejo de Investigación</h1>
+          <p class="hero-lead">Cargá temas, generá el Orden del Día y abrí las carpetas de archivos desde un solo sitio.</p>
+          <div class="hero-actions">
+            <a class="btn btn-light" href="#acta" data-go="acta">Ver temas cargados</a>
+            <button type="button" id="btn-od-inicio" class="btn btn-light">Descargar Orden del Día</button>
+            <a class="btn btn-ghost-light" href="#cargar" data-go="cargar">Cargar un tema</a>
+          </div>
+        </div>
+      </div>
+      <div class="wrap home-temas">
+        <div class="page-head">
+          <p class="kicker" id="home-acta-kicker">Acta en curso</p>
+          <h2 id="home-acta-titulo">Temas cargados</h2>
+        </div>
+        <div class="barra-seccion">
+          <label class="selector-acta selector-acta-page">
+            Acta
+            <select id="selector-acta-inicio"></select>
+          </label>
+          <button type="button" class="btn-actualizar linkish">Actualizar planilla</button>
+        </div>
+        <div class="aviso aviso-planilla hidden" data-aviso-planilla></div>
+        <div id="lista-temas-inicio"></div>
+        <article class="card" id="card-conexion">
+          <h2>Conectar la planilla del Consejo</h2>
+          <p>El Acta 195 y las demás reuniones están en la planilla de Streamlit. Hasta conectarlas, acá solo se ven ensayos locales.</p>
+          <p>Este prototipo <strong>solo agrega filas</strong>: no borra, no reemplaza y no invalida el otro sistema.</p>
+          <p>En Streamlit Cloud → Settings → Secrets, copiá el JSON de <code>gcp_service_account</code> y pegalo acá. Queda solo en esta Mac.</p>
+          <textarea id="json-sa" rows="7" placeholder='{"type": "service_account", "project_id": "..."}'></textarea>
+          <button type="button" id="btn-conectar" class="btn btn-navy">Conectar planilla</button>
+        </article>
+      </div>
+    </section>
+
+    <section id="acta" class="page">
+      <div class="page-head wrap">
+        <p class="kicker" id="acta-fecha">Elegí un acta</p>
+        <h1 id="acta-titulo">Actas del Consejo</h1>
+        <p class="lead" id="acta-meta">Elegí la reunión y se listan los temas de esa acta.</p>
+        <label class="selector-acta selector-acta-page">
+          Acta
+          <select id="selector-acta"></select>
+        </label>
+        <div class="barra-seccion">
+          <a id="link-drive-acta" class="btn btn-navy hidden" target="_blank" rel="noopener">Abrir carpeta de esta acta</a>
+          <a id="link-planilla" class="btn btn-navy" target="_blank" rel="noopener" href="https://docs.google.com/spreadsheets/d/17MiyW17W7oLIwSCKjDXCoA85CwBkYqHYhDKblVN37c8/edit?gid=1058037844#gid=1058037844">Abrir planilla de temas</a>
+        </div>
+      </div>
+      <div id="aviso-cerrada" class="wrap aviso hidden">Esta acta está cerrada. Se puede consultar y, si hace falta, cargar con aviso.</div>
+      <div class="wrap aviso aviso-planilla hidden" data-aviso-planilla></div>
+      <div class="wrap" id="pendientes"></div>
+      <div class="wrap toolbar">
+        <input id="buscar" type="search" placeholder="Buscar en esta acta">
+        <span id="conteo-temas" class="conteo"></span>
+        <button type="button" class="btn-actualizar linkish">Actualizar planilla</button>
+      </div>
+      <div class="wrap bloque-busca">
+        <label>Buscar en todas las actas
+          <input id="buscar-global" type="search" placeholder="Título, unidad, director o responsable">
+        </label>
+        <div id="resultados-global" class="resultados-global" hidden></div>
+      </div>
+      <div class="wrap" id="lista-temas"></div>
+    </section>
+
+    <section id="cargar" class="page">
+      <div class="page-head wrap">
+        <p class="kicker">Carga al Orden del Día</p>
+        <h1>Cargar tema</h1>
+        <p class="lead" id="cargar-acta-label">Se guarda en la acta que elijas acá.</p>
+        <label class="selector-acta selector-acta-page">
+          Acta
+          <select id="selector-acta-cargar"></select>
+        </label>
+      </div>
+      <form id="form-tema" class="wrap form-page">
+        <div class="form-grid">
+          <label>Tipo de actividad
+            <select name="tipo" id="campo-tipo"></select>
+          </label>
+          <label>Denominación
+            <input name="titulo" required maxlength="220" placeholder="Nombre del tema">
+          </label>
+          <input type="hidden" name="anio" value="2026">
+          <label>Descripción <small>máx. 50 palabras</small>
+            <textarea name="descripcion" rows="3"></textarea>
+          </label>
+          <div data-group="puntaje">
+            <label>Puntaje
+              <input name="puntaje" placeholder="87,9">
+            </label>
+          </div>
+          <div data-group="docente" class="span-2 form-grid">
+            <label>Apellido y nombre del docente
+              <input name="docente">
+            </label>
+            <label>DNI
+              <input name="dni">
+            </label>
+          </div>
+          <div data-group="director" class="span-2 form-grid">
+            <label>Director <input name="director"></label>
+            <label>Categoría del director
+              <select name="cat_director" id="campo-cat-dir"></select>
+            </label>
+            <label>Codirector <input name="codirector"></label>
+            <label>Categoría del codirector
+              <select name="cat_codirector" id="campo-cat-codir"></select>
+            </label>
+            <label class="span-2">Equipo <textarea name="equipo" rows="2"></textarea></label>
+            <label>Instituto <input name="instituto"></label>
+            <label>Cátedra <input name="catedra"></label>
+            <label>Alumnos <input name="alumnos"></label>
+            <label>Resolución CD <input name="resolucion_cd" maxlength="10"></label>
+            <label>Resolución CS <input name="resolucion_cs" maxlength="10"></label>
+          </div>
+          <div data-group="finanzas" class="span-2 form-grid">
+            <label>Tipo de financiamiento
+              <select name="tipo_financiamiento">
+                <option value="">Seleccionar...</option>
+                <option>Interno</option>
+                <option>Externo</option>
+                <option>Sin financiamiento</option>
+              </select>
+            </label>
+            <label>Fuente <input name="fuente"></label>
+            <label>Monto <input name="monto" type="number" step="1000"></label>
+          </div>
+          <div class="span-2">
+            <span class="label">Unidades académicas</span>
+            <div class="checks" id="campo-unidades"></div>
+          </div>
+          <label class="span-2">Responsable de carga
+            <input name="responsable" required>
+          </label>
+          <div class="span-2 acciones-carga">
+            <label class="toggle" title="Si no está tildado, queda solo en esta Mac. Si lo tildás, se agrega una fila en la planilla real.">
+              <input type="checkbox" id="escribir-sheets">
+              Guardar en la planilla real
+            </label>
+            <button type="submit" class="btn btn-primary">Enviar al Consejo</button>
+          </div>
+        </div>
+        <aside class="revision" id="revision"></aside>
+      </form>
+    </section>
+
+    <section id="od" class="page">
+      <div class="page-head wrap">
+        <p class="kicker">Documento Word</p>
+        <h1>Orden del Día</h1>
+        <p class="lead" id="od-label">Elegí el acta de esta sección y descargá el Word.</p>
+        <label class="selector-acta selector-acta-page">
+          Elegir Orden del Día
+          <select id="selector-acta-od"></select>
+        </label>
+      </div>
+      <div class="wrap cards-2">
+        <article class="card">
+          <h2>Descargar Orden del Día</h2>
+          <p>Usa los temas de esa acta, en el orden de la lista.</p>
+          <button type="button" id="btn-preview" class="btn btn-navy">Ver vista previa</button>
+          <button type="button" id="btn-od" class="btn btn-primary">Descargar Word</button>
+        </article>
+        <article class="card" id="bloque-informe">
+          <h2>Informe por responsable</h2>
+          <p>Word solo con los temas que cargó una persona en esta acta.</p>
+          <input id="responsable-informe" list="lista-responsables" placeholder="Nombre del responsable">
+          <datalist id="lista-responsables"></datalist>
+          <button type="button" id="descargar-informe" class="btn btn-navy">Descargar informe</button>
+        </article>
+      </div>
+      <div class="wrap" id="vista-previa-od"></div>
+    </section>
+
+    <section id="archivos" class="page">
+      <div class="page-head wrap">
+        <p class="kicker">Google Drive</p>
+        <h1>Carga de archivos</h1>
+        <p class="lead">Se abre la carpeta de la acta. El archivo se sube ahí, igual que en el sistema actual.</p>
+      </div>
+      <div class="wrap cards-3" id="lista-archivos"></div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p>Universidad Católica de Cuyo · Secretaría de Investigación</p>
+      <p>Prototipo local. El sistema de Streamlit sigue en el aire sin cambios.</p>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js?v=18"></script>
+</body>
+</html>

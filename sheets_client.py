@@ -11,9 +11,14 @@ from catalogo import LIBRO_NOMBRE, SHEET_ID, TAB_HOJA2, TAB_PUBLICACIONES
 
 ROOT = Path(__file__).resolve().parent
 PARENT = ROOT.parent
-DATA_DIR = ROOT / "data"
+if os.environ.get("VERCEL"):
+    DATA_DIR = Path("/tmp/consejo-data")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    DATA_DIR = ROOT / "data"
 ENSAYO_PATH = DATA_DIR / "ensayos.json"
-CACHE_PATH = DATA_DIR / "planilla_cache.json"
+_CACHE_EMPAQUETADA = ROOT / "data" / "planilla_cache.json"
+CACHE_PATH = _CACHE_EMPAQUETADA if _CACHE_EMPAQUETADA.is_file() else (DATA_DIR / "planilla_cache.json")
 
 _SCOPES = (
     "https://www.googleapis.com/auth/spreadsheets",

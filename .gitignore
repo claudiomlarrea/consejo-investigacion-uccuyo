@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
-.streamlit/secrets.toml
-secrets.toml
 data/ensayos.json
+secrets.toml
 *.pyc
 .DS_Store
+.vercel/
