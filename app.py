@@ -519,10 +519,14 @@ def api_cargar(numero: int, body: TemaIn):
         "responsable_de_carga",
     ]
     tema = dict(zip(claves, fila))
-    if body.escribir_en_sheets:
+    # En el sitio público siempre se escribe en la planilla del Consejo.
+    if _en_produccion() or body.escribir_en_sheets:
         info = estado_conexion()
         if not info["sheets_ok"]:
-            raise HTTPException(503, info["error"])
+            raise HTTPException(
+                503,
+                "La planilla del Consejo no está conectada. Pedile a Secretaría que cargue GOOGLE_SA_JSON en Vercel.",
+            )
         append_tema(fila)
         _cargar_hoja(force=True)
         return {"ok": True, "modo": "sheets", "tema": _tema_publico(tema, 0)}

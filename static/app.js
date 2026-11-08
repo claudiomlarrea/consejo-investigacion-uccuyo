@@ -40,13 +40,12 @@ async function api(path, opts) {
   return data;
 }
 
-function escribirSheets() {
-  return $("#escribir-sheets").checked;
-}
-
 async function confirmarEscritura() {
-  if (!escribirSheets()) return true;
-  return window.confirm("Esto agrega una fila en la planilla real de Google Sheets. ¿Continuar?");
+  if (!state.sheetsOk) {
+    toast("La planilla del Consejo no está conectada. Avisá a Secretaría.");
+    return false;
+  }
+  return window.confirm("¿Enviar este tema al Orden del Día del Consejo?");
 }
 
 const PAGINAS = ["inicio", "acta", "cargar", "od", "archivos"];
@@ -150,7 +149,7 @@ function pintarAvisoPlanilla() {
   let texto = "";
   if (state.sheetsOk) texto = "";
   else if (hayHoja) texto = "Temas leídos de la planilla del Consejo. Streamlit no se tocó.";
-  else texto = "La planilla real no está conectada. Se ven solo ensayos de esta Mac.";
+  else texto = "Se consulta el historial guardado. Para cargar temas nuevos hace falta conectar la planilla.";
   $$("[data-aviso-planilla]").forEach((el) => {
     el.textContent = texto;
     el.classList.toggle("hidden", !texto);
@@ -503,7 +502,7 @@ async function enviarTema(ev) {
   }
   if (!(await confirmarEscritura())) return;
   const body = datosForm();
-  body.escribir_en_sheets = escribirSheets();
+  body.escribir_en_sheets = true;
   try {
     const res = await api("/api/actas/" + state.acta + "/temas", {
       method: "POST",
@@ -516,7 +515,7 @@ async function enviarTema(ev) {
     if (body.responsable) ev.target.responsable.value = body.responsable;
     if ($("#campo-tipo")) $("#campo-tipo").value = "";
     pintarGrupos();
-    toast(res.modo === "sheets" ? "Tema agregado a Google Sheets." : "Tema guardado en ensayo local.");
+    toast("Tema enviado al Consejo.");
     state.actas = await api("/api/actas");
     renderMenus();
     await elegirActa(state.acta, true);
