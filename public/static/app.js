@@ -209,14 +209,7 @@ function poblarFormulario() {
   $("#campo-unidades").innerHTML = c.unidades.map((u) =>
     "<label><input type='checkbox' name='unidades' value=\"" + escapeHtml(u) + "\"><span>" + escapeHtml(u) + "</span></label>"
   ).join("");
-  const draft = localStorage.getItem("consejo-borrador");
-  if (draft) {
-    try { aplicarBorrador(JSON.parse(draft)); } catch (e) {}
-  }
-  const resp = localStorage.getItem("consejo-responsable");
-  if (resp && $("#form-tema").responsable && !$("#form-tema").responsable.value) {
-    $("#form-tema").responsable.value = resp;
-  }
+  localStorage.removeItem("consejo-borrador");
   pintarGrupos();
 }
 
@@ -249,18 +242,6 @@ function datosForm() {
   };
 }
 
-function aplicarBorrador(data) {
-  const form = $("#form-tema");
-  Object.keys(data).forEach((k) => {
-    if (k === "unidades") return;
-    if (form.elements[k]) form.elements[k].value = data[k];
-  });
-  (data.unidades || []).forEach((u) => {
-    const box = form.querySelector("input[name='unidades'][value=\"" + CSS.escape(u) + "\"]");
-    if (box) box.checked = true;
-  });
-}
-
 function item(label, valor, req) {
   const texto = String(valor || "").trim();
   if (texto) return [label, texto, "ok"];
@@ -275,8 +256,6 @@ function tituloDuplicado(titulo) {
 
 function pintarRevision() {
   const d = datosForm();
-  localStorage.setItem("consejo-borrador", JSON.stringify(d));
-  if (d.responsable) localStorage.setItem("consejo-responsable", d.responsable);
   const vis = grupoVisible(d.tipo);
   const actaTxt = state.acta ? "Acta " + state.acta : "Elegí un acta";
   const dup = tituloDuplicado(d.titulo);
@@ -510,7 +489,7 @@ async function enviarTema(ev) {
       body: JSON.stringify(body),
     });
     localStorage.removeItem("consejo-borrador");
-    if (body.responsable) localStorage.setItem("consejo-responsable", body.responsable);
+    localStorage.removeItem("consejo-responsable");
     ev.target.reset();
     if (body.responsable) ev.target.responsable.value = body.responsable;
     if ($("#campo-tipo")) $("#campo-tipo").value = "";
