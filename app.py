@@ -486,6 +486,8 @@ def _fila_sheet(numero: int, body: TemaIn) -> List[Any]:
 def api_cargar(numero: int, body: TemaIn):
     if numero not in ACTAS:
         raise HTTPException(404, "Acta inexistente")
+    if estado_acta(numero) == "cerrada":
+        raise HTTPException(400, "Las actas cerradas son solo consulta. No se pueden cargar temas.")
     errores = _validar(numero, body)
     if errores:
         raise HTTPException(400, {"errores": errores})

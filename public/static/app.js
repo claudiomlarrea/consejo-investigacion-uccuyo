@@ -78,6 +78,11 @@ function ir(page, replay) {
     const od = $("#vista-previa-od");
     if (od) od.innerHTML = previewHtml();
   }
+  if (page === "cargar") {
+    const cargar = $("#selector-acta-cargar");
+    const n = cargar && Number(cargar.value);
+    if (n && n !== Number(state.acta)) elegirActa(n, false);
+  }
 }
 
 function grupoVisible(tipo) {
@@ -110,20 +115,34 @@ function textoConteo(a) {
   return a.temas + " tema" + (a.temas === 1 ? "" : "s");
 }
 
-function opcionesActa() {
-  return state.actas.map((a) =>
+function opcionesActa(soloCarga) {
+  const lista = soloCarga
+    ? state.actas.filter((a) => a.estado !== "cerrada")
+    : state.actas;
+  return lista.map((a) =>
     "<option value=\"" + a.numero + "\">Acta " + a.numero + " · " + a.mes + " · " + a.estado_etiqueta + " (" + textoConteo(a) + ")</option>"
   ).join("");
 }
 
 function sincronizarSelectores() {
-  $$("#selector-acta, #selector-acta-od, #selector-acta-inicio, #selector-acta-cargar").forEach((sel) => {
+  $$("#selector-acta, #selector-acta-od, #selector-acta-inicio").forEach((sel) => {
     if (!sel) return;
     const actual = String(sel.value);
-    sel.innerHTML = opcionesActa();
+    sel.innerHTML = opcionesActa(false);
     if (state.acta) sel.value = String(state.acta);
     else if (actual) sel.value = actual;
   });
+  const cargar = $("#selector-acta-cargar");
+  if (cargar) {
+    const actual = String(cargar.value);
+    cargar.innerHTML = opcionesActa(true);
+    const aptas = state.actas.filter((a) => a.estado !== "cerrada");
+    const preferida = aptas.find((a) => a.numero === state.acta)
+      || aptas.find((a) => a.estado === "en_curso")
+      || aptas[0];
+    if (preferida) cargar.value = String(preferida.numero);
+    else if (actual) cargar.value = actual;
+  }
 }
 
 function pintarAvisoPlanilla() {
@@ -373,7 +392,10 @@ function puedeReordenar() {
 
 function tablaTemas(filas, conOrden) {
   if (!filas.length) {
-    return "<article class='card'><p>Esta acta todavía no tiene temas cargados.</p></article>";
+    const cerrada = state.detalle && state.detalle.acta && state.detalle.acta.estado === "cerrada";
+    return "<article class='card'><p>" + (cerrada
+      ? "No hay temas guardados para esta acta cerrada."
+      : "Esta acta todavía no tiene temas cargados.") + "</p></article>";
   }
   const orden = conOrden === undefined ? puedeReordenar() : !!conOrden;
   return `<div class="tabla-wrap"><table class="tabla-temas">
@@ -471,7 +493,8 @@ async function enviarTema(ev) {
     return;
   }
   if (state.detalle && state.detalle.acta && state.detalle.acta.estado === "cerrada") {
-    if (!window.confirm("Esta acta está cerrada. ¿Cargar el tema igual?")) return;
+    toast("Las actas cerradas son solo consulta. Elegí el acta en curso para cargar.");
+    return;
   }
   if (!(await confirmarEscritura())) return;
   const body = datosForm();
