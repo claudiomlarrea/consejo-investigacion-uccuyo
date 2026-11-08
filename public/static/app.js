@@ -204,7 +204,7 @@ function renderMenus() {
 function poblarFormulario() {
   const c = state.catalogo;
   const opts = (arr, extra) => (extra || "") + arr.map((x) => "<option>" + escapeHtml(x) + "</option>").join("");
-  $("#campo-tipo").innerHTML = opts(c.tipos);
+  $("#campo-tipo").innerHTML = '<option value="">Seleccionar…</option>' + opts(c.tipos);
   $("#campo-cat-dir").innerHTML = '<option value="">Seleccionar</option>' + opts(c.categorias);
   $("#campo-cat-codir").innerHTML = '<option value="">Seleccionar</option>' + opts(c.categorias);
   $("#campo-unidades").innerHTML = c.unidades.map((u) =>
@@ -496,6 +496,11 @@ async function enviarTema(ev) {
     toast("Las actas cerradas son solo consulta. Elegí el acta en curso para cargar.");
     return;
   }
+  if (!(d.tipo || "").trim()) {
+    toast("Elegí un tipo de actividad.");
+    $("#campo-tipo").focus();
+    return;
+  }
   if (!(await confirmarEscritura())) return;
   const body = datosForm();
   body.escribir_en_sheets = escribirSheets();
@@ -509,7 +514,7 @@ async function enviarTema(ev) {
     if (body.responsable) localStorage.setItem("consejo-responsable", body.responsable);
     ev.target.reset();
     if (body.responsable) ev.target.responsable.value = body.responsable;
-    if (state.catalogo) $("#campo-tipo").value = state.catalogo.tipos[0];
+    if ($("#campo-tipo")) $("#campo-tipo").value = "";
     pintarGrupos();
     toast(res.modo === "sheets" ? "Tema agregado a Google Sheets." : "Tema guardado en ensayo local.");
     state.actas = await api("/api/actas");
