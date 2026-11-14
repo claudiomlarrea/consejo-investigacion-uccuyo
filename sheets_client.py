@@ -1,13 +1,34 @@
-"""Lee y escribe la misma planilla Datos Consejo Investigación, sin Streamlit."""
+"""Lee y escribe la misma planilla Datos Consejo Investigación, sin Streamlit.
+
+Contrato de seguridad:
+- Solo se AGREGAN filas (append). Nunca se borran, vacían ni sobrescriben filas existentes.
+- Cada carga de tema se verifica y se duplica en la hoja de auditoría Registro_cargas.
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from catalogo import LIBRO_NOMBRE, SHEET_ID, TAB_HOJA2, TAB_PUBLICACIONES
+
+# Hoja append-only de respaldo. Si alguien edita/borra en Hoja 2, queda rastro acá.
+TAB_AUDITORIA = "Registro_cargas"
+_AUDITORIA_HEADERS = [
+    "timestamp_utc",
+    "numero_acta",
+    "fecha_acta",
+    "anio",
+    "tipo",
+    "titulo",
+    "responsable_de_carga",
+    "unidad_academica",
+    "fila_json",
+]
 
 ROOT = Path(__file__).resolve().parent
 PARENT = ROOT.parent
@@ -164,18 +185,147 @@ def leer_hoja2() -> List[Dict[str, Any]]:
     return _hoja2().get_all_records()
 
 
-def append_tema(fila: List[Any]) -> None:
+def _append_solo(worksheet, fila: List[Any]) -> None:
+    """Única vía de escritura a celdas: agregar al final. No update/clear/delete."""
     from gspread.utils import InsertDataOption, ValueInputOption
 
-    _hoja2().append_row(
+    worksheet.append_row(
         fila,
         value_input_option=ValueInputOption.user_entered,
         insert_data_option=InsertDataOption.insert_rows,
     )
 
 
+def _titulo_fila(fila: List[Any]) -> str:
+    return str(fila[4] if len(fila) > 4 else "").strip().casefold()
+
+
+def _verificar_ultima_carga(worksheet, fila: List[Any], filas_antes: int) -> bool:
+    """Confirma que la fila quedó en la planilla (por cantidad y por título)."""
+    try:
+        valores = worksheet.get_all_values()
+    except Exception:
+        return False
+    if len(valores) <= filas_antes:
+        return False
+    titulo = _titulo_fila(fila)
+    if not titulo:
+        return len(valores) > filas_antes
+    # Buscar el título en las filas nuevas (y un margen por inserts concurrentes).
+    for row in valores[max(1, filas_antes - 2) :]:
+        celda = str(row[4] if len(row) > 4 else "").strip().casefold()
+        if celda == titulo:
+            return True
+    return False
+
+
+def _titulo_ya_en_hoja(worksheet, fila: List[Any], numero_acta: Any = None) -> bool:
+    """True si ese título ya figura (evita re-append duplicado tras un append ambiguo)."""
+    titulo = _titulo_fila(fila)
+    if not titulo:
+        return False
+    acta = str(numero_acta if numero_acta is not None else (fila[0] if fila else "")).strip()
+    try:
+        valores = worksheet.get_all_values()
+    except Exception:
+        return False
+    for row in valores[1:]:
+        celda = str(row[4] if len(row) > 4 else "").strip().casefold()
+        if celda != titulo:
+            continue
+        if not acta:
+            return True
+        acta_fila = str(row[0] if row else "").strip()
+        if acta_fila == acta or acta_fila.endswith(".0") and acta_fila[:-2] == acta:
+            return True
+    return False
+
+
+def append_tema(fila: List[Any], reintentos: int = 3) -> None:
+    """Agrega un tema a Hoja 2. Reintenta y verifica. Nunca borra ni edita filas previas."""
+    hoja = _hoja2()
+    # Si un intento anterior ya dejó la fila, no volver a insertar.
+    if _titulo_ya_en_hoja(hoja, fila):
+        try:
+            registrar_auditoria_tema(fila)
+        except Exception:
+            pass
+        return
+    ultimo_error = None  # type: Optional[Exception]
+    for intento in range(reintentos):
+        try:
+            if intento > 0 and _titulo_ya_en_hoja(hoja, fila):
+                try:
+                    registrar_auditoria_tema(fila)
+                except Exception:
+                    pass
+                return
+            filas_antes = len(hoja.get_all_values())
+            _append_solo(hoja, fila)
+            if _verificar_ultima_carga(hoja, fila, filas_antes) or _titulo_ya_en_hoja(hoja, fila):
+                try:
+                    registrar_auditoria_tema(fila)
+                except Exception:
+                    # La fila principal ya está; la auditoría no debe hacer fallar la carga.
+                    pass
+                return
+            ultimo_error = RuntimeError(
+                "La planilla no confirmó el tema recién cargado. No se borró nada; reintentá."
+            )
+        except Exception as exc:
+            ultimo_error = exc
+            # Si el error fue de red pero la fila igual quedó, no reintentar append.
+            if _titulo_ya_en_hoja(hoja, fila):
+                try:
+                    registrar_auditoria_tema(fila)
+                except Exception:
+                    pass
+                return
+        time.sleep(0.4 * (intento + 1))
+    if _titulo_ya_en_hoja(hoja, fila):
+        try:
+            registrar_auditoria_tema(fila)
+        except Exception:
+            pass
+        return
+    raise RuntimeError(
+        "No se pudo confirmar la carga en la planilla. Los temas previos no se tocaron. "
+        "Detalle: {}".format(ultimo_error)
+    )
+
+
+def _hoja_auditoria():
+    ok, err = conectar()
+    if not ok:
+        raise RuntimeError(err)
+    libro = _client.open_by_key(SHEET_ID)
+    try:
+        return libro.worksheet(TAB_AUDITORIA)
+    except Exception:
+        ws = libro.add_worksheet(title=TAB_AUDITORIA, rows=2000, cols=len(_AUDITORIA_HEADERS))
+        _append_solo(ws, _AUDITORIA_HEADERS)
+        return ws
+
+
+def registrar_auditoria_tema(fila: List[Any]) -> None:
+    """Copia append-only de cada carga (respaldo si alguien altera Hoja 2 a mano)."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    registro = [
+        ts,
+        fila[0] if len(fila) > 0 else "",
+        fila[1] if len(fila) > 1 else "",
+        fila[2] if len(fila) > 2 else "",
+        fila[3] if len(fila) > 3 else "",
+        fila[4] if len(fila) > 4 else "",
+        fila[23] if len(fila) > 23 else "",
+        fila[13] if len(fila) > 13 else "",
+        json.dumps(fila, ensure_ascii=False),
+    ]
+    _append_solo(_hoja_auditoria(), registro)
+
+
 def append_publicacion(fila: List[Any]) -> None:
-    _publicaciones().append_row(fila)
+    _append_solo(_publicaciones(), fila)
 
 
 def _ensayo_vacio() -> Dict[str, Any]:

@@ -349,6 +349,12 @@ def api_preview(numero: int):
 
 @app.post("/api/actas/{numero}/importar-od")
 async def api_importar_od(numero: int, archivo: UploadFile = File(...)):
+    # Solo útil en Mac local. En producción la fuente de verdad es la planilla (append-only).
+    if _en_produccion():
+        raise HTTPException(
+            403,
+            "En el sitio público no se importa Word: los temas viven en la planilla y no se reemplazan.",
+        )
     if numero not in ACTAS:
         raise HTTPException(404, "Acta inexistente")
     nombre = (archivo.filename or "").lower()
@@ -488,6 +494,15 @@ def api_cargar(numero: int, body: TemaIn):
         raise HTTPException(404, "Acta inexistente")
     if estado_acta(numero) == "cerrada":
         raise HTTPException(400, "Las actas cerradas son solo consulta. No se pueden cargar temas.")
+    # Siempre leer la planilla fresca antes de validar (evita duplicar / perder de vista cargas recientes).
+    if _en_produccion() or body.escribir_en_sheets:
+        info = estado_conexion()
+        if not info["sheets_ok"]:
+            raise HTTPException(
+                503,
+                "No se puede cargar: la planilla no está conectada. Los temas ya guardados no se tocan.",
+            )
+        _cargar_hoja(force=True)
     errores = _validar(numero, body)
     if errores:
         raise HTTPException(400, {"errores": errores})
@@ -519,17 +534,28 @@ def api_cargar(numero: int, body: TemaIn):
         "responsable_de_carga",
     ]
     tema = dict(zip(claves, fila))
-    # En el sitio público siempre se escribe en la planilla del Consejo.
+    # En el sitio público siempre se escribe en la planilla del Consejo (solo append).
     if _en_produccion() or body.escribir_en_sheets:
-        info = estado_conexion()
-        if not info["sheets_ok"]:
+        try:
+            append_tema(fila)
+        except Exception as exc:
             raise HTTPException(
                 503,
-                "La planilla del Consejo no está conectada. Pedile a Secretaría que cargue GOOGLE_SA_JSON en Vercel.",
-            )
-        append_tema(fila)
-        _cargar_hoja(force=True)
-        return {"ok": True, "modo": "sheets", "tema": _tema_publico(tema, 0)}
+                "No se pudo guardar el tema en la planilla. No se borró ni modificó nada. "
+                "Reintentá en un momento. ({})".format(exc),
+            ) from exc
+        # Incorporar al caché en memoria aunque falle un refresh completo.
+        actuales = list(_cache_hoja.get("rows") or [])
+        actuales.append(tema)
+        _cache_hoja["rows"] = actuales
+        _cache_hoja["fuente"] = "sheets"
+        _cache_hoja["error"] = None
+        try:
+            _cargar_hoja(force=True)
+        except Exception:
+            pass
+        return {"ok": True, "modo": "sheets", "tema": _tema_publico(tema, 0), "guardado": True}
+    # Ensayo solo en Mac local de desarrollo; en Vercel nunca llega acá.
     tema["_ensayo"] = True
     guardar_ensayo_tema(tema)
     return {"ok": True, "modo": "ensayo", "tema": _tema_publico(tema, 0)}

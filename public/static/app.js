@@ -465,6 +465,9 @@ async function enviarTema(ev) {
     toast("Elegí un acta en el menú Actas.");
     return;
   }
+  const form = ev.target;
+  const btn = form.querySelector('button[type="submit"]');
+  if (btn && btn.disabled) return;
   const d = datosForm();
   if (tituloDuplicado(d.titulo)) {
     toast("Ese título ya está cargado en esta acta.");
@@ -482,24 +485,34 @@ async function enviarTema(ev) {
   if (!(await confirmarEscritura())) return;
   const body = datosForm();
   body.escribir_en_sheets = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.label = btn.textContent;
+    btn.textContent = "Guardando…";
+  }
   try {
-    const res = await api("/api/actas/" + state.acta + "/temas", {
+    await api("/api/actas/" + state.acta + "/temas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     localStorage.removeItem("consejo-borrador");
     localStorage.removeItem("consejo-responsable");
-    ev.target.reset();
-    if (body.responsable) ev.target.responsable.value = body.responsable;
+    form.reset();
+    if (body.responsable && form.responsable) form.responsable.value = body.responsable;
     if ($("#campo-tipo")) $("#campo-tipo").value = "";
     pintarGrupos();
-    toast("Tema enviado al Consejo.");
+    toast("Tema guardado en la planilla del Consejo.");
     state.actas = await api("/api/actas");
     renderMenus();
     await elegirActa(state.acta, true);
   } catch (err) {
-    toast(err.message);
+    toast(err.message || "No se pudo guardar. El formulario quedó intacto para reintentar.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.label || "Enviar al Consejo";
+    }
   }
 }
 
