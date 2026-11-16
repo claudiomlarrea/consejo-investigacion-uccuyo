@@ -404,16 +404,24 @@ function renderPanelOrdenUnidades() {
   const unlocked = puedeOrdenarUnidades();
   const desbloqueo = $("#desbloqueo-secretaria");
   const activa = $("#orden-unidades-activa");
-  if (desbloqueo) desbloqueo.classList.toggle("hidden", unlocked);
+  const btnUnlock = $("#btn-desbloquear-unidades");
+  const btnChange = $("#btn-cambiar-correo-unidades");
+  const emailInput = $("#email-secretaria");
+  // El campo de correo siempre queda visible para poder probar otro autorizado.
+  if (desbloqueo) desbloqueo.classList.remove("hidden");
+  if (btnUnlock) btnUnlock.classList.toggle("hidden", unlocked);
+  if (btnChange) btnChange.classList.toggle("hidden", !unlocked);
+  if (emailInput) {
+    emailInput.readOnly = unlocked;
+    if (state.emailSecretaria && (!emailInput.value || unlocked)) {
+      emailInput.value = state.emailSecretaria;
+    }
+  }
   if (activa) {
     activa.classList.toggle("hidden", !unlocked);
     activa.textContent = unlocked
       ? "Orden de unidades desbloqueado para " + state.emailSecretaria
       : "";
-  }
-  const emailInput = $("#email-secretaria");
-  if (emailInput && state.emailSecretaria && !emailInput.value) {
-    emailInput.value = state.emailSecretaria;
   }
   const lista = $("#lista-orden-unidades");
   if (!lista) return;
@@ -441,6 +449,19 @@ function renderPanelOrdenUnidades() {
   });
 }
 
+function cambiarCorreoOrdenUnidades() {
+  state.emailSecretaria = "";
+  sessionStorage.removeItem(EMAIL_SECRETARIA_KEY);
+  const emailInput = $("#email-secretaria");
+  if (emailInput) {
+    emailInput.readOnly = false;
+    emailInput.value = "";
+    emailInput.focus();
+  }
+  renderPanelOrdenUnidades();
+  toast("Ingresá otro correo autorizado y desbloqueá de nuevo.");
+}
+
 async function desbloquearOrdenUnidades() {
   const email = (($("#email-secretaria") && $("#email-secretaria").value) || "").trim().toLowerCase();
   if (!email) {
@@ -449,13 +470,15 @@ async function desbloquearOrdenUnidades() {
   }
   const allow = (state.correosOrdenUnidades || []).map((e) => String(e).toLowerCase());
   if (!allow.includes(email)) {
-    toast("Ese correo no puede cambiar el orden de unidades.");
+    toast(
+      "Ese correo no está autorizado. Usá investigacion@, asistente.inv@ o vincutec@ (uccuyo.edu.ar)."
+    );
     return;
   }
   state.emailSecretaria = email;
   sessionStorage.setItem(EMAIL_SECRETARIA_KEY, email);
   renderPanelOrdenUnidades();
-  toast("Orden de unidades desbloqueado.");
+  toast("Orden de unidades desbloqueado para " + email);
 }
 
 async function moverUnidad(unidad, delta) {
@@ -781,6 +804,8 @@ $("#btn-preview").addEventListener("click", verPreview);
 $("#btn-conectar").addEventListener("click", conectarPlanilla);
 const btnDesbloquear = $("#btn-desbloquear-unidades");
 if (btnDesbloquear) btnDesbloquear.addEventListener("click", desbloquearOrdenUnidades);
+const btnCambiarCorreo = $("#btn-cambiar-correo-unidades");
+if (btnCambiarCorreo) btnCambiarCorreo.addEventListener("click", cambiarCorreoOrdenUnidades);
 const emailSecretaria = $("#email-secretaria");
 if (emailSecretaria) {
   emailSecretaria.addEventListener("keydown", (ev) => {
