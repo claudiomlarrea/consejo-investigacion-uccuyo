@@ -71,6 +71,65 @@ def aplicar_orden_manual(
     return ordenados
 
 
+def unidades_en_orden(registros: List[Dict[str, Any]]) -> List[str]:
+    """Unidades en el orden en que aparecen (sin duplicar)."""
+    vistas = []  # type: List[str]
+    vistos = set()  # type: set
+    for r in registros:
+        u = unidad_de(r)
+        key = u.casefold()
+        if key in vistos:
+            continue
+        vistos.add(key)
+        vistas.append(u)
+    return vistas
+
+
+def aplicar_orden_unidades(
+    registros: List[Dict[str, Any]], orden_unidades: Optional[List[str]]
+) -> List[Dict[str, Any]]:
+    """Reordena bloques de unidad; dentro de cada unidad conserva el orden relativo."""
+    if not registros or not orden_unidades:
+        return list(registros)
+    por_unidad = {}  # type: Dict[str, List[Dict[str, Any]]]
+    claves = []  # type: List[str]
+    for r in registros:
+        u = unidad_de(r)
+        key = u.casefold()
+        if key not in por_unidad:
+            por_unidad[key] = []
+            claves.append(key)
+        por_unidad[key].append(r)
+    # Mapa casefold -> etiqueta canónica (primera vista)
+    etiqueta = {}  # type: Dict[str, str]
+    for r in registros:
+        u = unidad_de(r)
+        etiqueta.setdefault(u.casefold(), u)
+    out = []  # type: List[Dict[str, Any]]
+    usados = set()  # type: set
+    for nombre in orden_unidades:
+        key = (nombre or "").strip().casefold()
+        if not key or key in usados:
+            continue
+        if key in por_unidad:
+            out.extend(por_unidad[key])
+            usados.add(key)
+    for key in claves:
+        if key not in usados:
+            out.extend(por_unidad[key])
+    return out
+
+
+def aplicar_orden_od(
+    registros: List[Dict[str, Any]],
+    orden_temas: Optional[List[str]] = None,
+    orden_unidades: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Primero orden de temas (dentro de unidad), luego bloques de unidad del OD."""
+    base = aplicar_orden_manual(registros, orden_temas)
+    return aplicar_orden_unidades(base, orden_unidades)
+
+
 _RE_ITEM = re.compile(r"^(\d+)\.\s+(.+?)\s+-\s+(.+)$")
 _RE_CAMPO = re.compile(
     r"^\s*(Descripción|Director|Codirector|Equipo|Unidad Académica|Puntaje|"

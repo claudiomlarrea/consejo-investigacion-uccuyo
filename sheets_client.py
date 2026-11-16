@@ -14,10 +14,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from catalogo import LIBRO_NOMBRE, SHEET_ID, TAB_HOJA2, TAB_PUBLICACIONES
+from catalogo import LIBRO_NOMBRE, SHEET_ID, TAB_HOJA2, TAB_ORDEN_UNIDADES, TAB_PUBLICACIONES
 
 # Hoja append-only de respaldo. Si alguien edita/borra en Hoja 2, queda rastro acá.
 TAB_AUDITORIA = "Registro_cargas"
+_ORDEN_UNIDADES_HEADERS = [
+    "numero_acta",
+    "unidades_json",
+    "actualizado_por",
+    "timestamp_utc",
+]
 _AUDITORIA_HEADERS = [
     "timestamp_utc",
     "numero_acta",
@@ -326,6 +332,85 @@ def registrar_auditoria_tema(fila: List[Any]) -> None:
 
 def append_publicacion(fila: List[Any]) -> None:
     _append_solo(_publicaciones(), fila)
+
+
+def _hoja_orden_unidades():
+    ok, err = conectar()
+    if not ok:
+        raise RuntimeError(err)
+    libro = _client.open_by_key(SHEET_ID)
+    try:
+        return libro.worksheet(TAB_ORDEN_UNIDADES)
+    except Exception:
+        ws = libro.add_worksheet(
+            title=TAB_ORDEN_UNIDADES, rows=200, cols=len(_ORDEN_UNIDADES_HEADERS)
+        )
+        _append_solo(ws, _ORDEN_UNIDADES_HEADERS)
+        return ws
+
+
+def leer_orden_unidades(numero_acta: int) -> Optional[List[str]]:
+    """Lee el orden de unidades guardado para un acta. None si no hay fila."""
+    try:
+        ws = _hoja_orden_unidades()
+        valores = ws.get_all_values()
+    except Exception:
+        return None
+    if len(valores) < 2:
+        return None
+    objetivo = str(numero_acta).strip()
+    for row in reversed(valores[1:]):
+        acta = str(row[0] if row else "").strip()
+        if acta.endswith(".0"):
+            acta = acta[:-2]
+        if acta != objetivo:
+            continue
+        raw = row[1] if len(row) > 1 else ""
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(data, list):
+            return [str(x) for x in data]
+        return None
+    return None
+
+
+def guardar_orden_unidades(
+    numero_acta: int, unidades: List[str], actualizado_por: str
+) -> None:
+    """Actualiza o crea la fila del acta en Orden_unidades. No toca Hoja 2."""
+    ws = _hoja_orden_unidades()
+    valores = ws.get_all_values()
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = [
+        numero_acta,
+        json.dumps(unidades, ensure_ascii=False),
+        (actualizado_por or "").strip().lower(),
+        ts,
+    ]
+    objetivo = str(numero_acta).strip()
+    fila_idx = None  # type: Optional[int]
+    for i, row in enumerate(valores[1:], start=2):
+        acta = str(row[0] if row else "").strip()
+        if acta.endswith(".0"):
+            acta = acta[:-2]
+        if acta == objetivo:
+            fila_idx = i
+            break
+    if fila_idx is None:
+        _append_solo(ws, payload)
+    else:
+        # update_cells / update — solo esa fila de metadatos, nunca temas.
+        from gspread.utils import ValueInputOption
+
+        ws.update(
+            "A{}:D{}".format(fila_idx, fila_idx),
+            [payload],
+            value_input_option=ValueInputOption.user_entered,
+        )
 
 
 def _ensayo_vacio() -> Dict[str, Any]:

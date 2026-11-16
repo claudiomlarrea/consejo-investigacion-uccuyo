@@ -1,3 +1,5 @@
+const EMAIL_SECRETARIA_KEY = "consejo-email-secretaria";
+
 const state = {
   catalogo: null,
   actas: [],
@@ -6,6 +8,9 @@ const state = {
   page: "inicio",
   pubTab: "revista",
   sheetsOk: false,
+  ordenUnidades: [],
+  emailSecretaria: (sessionStorage.getItem(EMAIL_SECRETARIA_KEY) || "").trim().toLowerCase(),
+  correosOrdenUnidades: ["investigacion@uccuyo.edu.ar", "asistente.inv@uccuyo.edu.ar"],
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -358,7 +363,14 @@ async function elegirActa(numero, abrir) {
   const homeT = $("#home-acta-titulo");
   if (homeK) homeK.textContent = a.fecha;
   if (homeT) homeT.textContent = "Temas cargados · Acta " + a.numero + " · " + a.mes;
+  state.ordenUnidades = Array.isArray(state.detalle.orden_unidades)
+    ? state.detalle.orden_unidades.slice()
+    : [];
+  if (Array.isArray(state.detalle.correos_orden_unidades) && state.detalle.correos_orden_unidades.length) {
+    state.correosOrdenUnidades = state.detalle.correos_orden_unidades.slice();
+  }
   renderTemas();
+  renderPanelOrdenUnidades();
   pintarRevision();
   sincronizarSelectores();
   if (abrir) ir("acta");
@@ -366,6 +378,106 @@ async function elegirActa(numero, abrir) {
 
 function puedeReordenar() {
   return !!(state.detalle && state.detalle.acta && state.detalle.acta.estado === "en_curso");
+}
+
+function puedeOrdenarUnidades() {
+  const email = (state.emailSecretaria || "").trim().toLowerCase();
+  if (!email) return false;
+  const allow = (state.correosOrdenUnidades || []).map((e) => String(e).toLowerCase());
+  return allow.includes(email) && puedeReordenar();
+}
+
+function renderPanelOrdenUnidades() {
+  const panel = $("#panel-orden-unidades");
+  if (!panel) return;
+  const enCurso = puedeReordenar();
+  const unidades = state.ordenUnidades || [];
+  if (!enCurso || !state.acta || unidades.length < 1) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const unlocked = puedeOrdenarUnidades();
+  const desbloqueo = $("#desbloqueo-secretaria");
+  const activa = $("#orden-unidades-activa");
+  if (desbloqueo) desbloqueo.classList.toggle("hidden", unlocked);
+  if (activa) {
+    activa.classList.toggle("hidden", !unlocked);
+    activa.textContent = unlocked
+      ? "Orden de unidades desbloqueado para " + state.emailSecretaria
+      : "";
+  }
+  const emailInput = $("#email-secretaria");
+  if (emailInput && state.emailSecretaria && !emailInput.value) {
+    emailInput.value = state.emailSecretaria;
+  }
+  const lista = $("#lista-orden-unidades");
+  if (!lista) return;
+  if (!unlocked) {
+    lista.innerHTML = unidades.map((u) =>
+      "<li><span></span><span>" + escapeHtml(u) + "</span></li>"
+    ).join("");
+    return;
+  }
+  lista.innerHTML = unidades.map((u, i) => `
+    <li data-unidad="${encodeURIComponent(u)}">
+      <span class="ord-unidad">
+        <button type="button" data-unit-move="-1" title="Subir unidad" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button type="button" data-unit-move="1" title="Bajar unidad" ${i === unidades.length - 1 ? "disabled" : ""}>↓</button>
+      </span>
+      <span>${escapeHtml(u)}</span>
+    </li>
+  `).join("");
+  lista.querySelectorAll("li[data-unidad]").forEach((el) => {
+    el.querySelectorAll("[data-unit-move]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        moverUnidad(decodeURIComponent(el.dataset.unidad), Number(btn.dataset.unitMove));
+      });
+    });
+  });
+}
+
+async function desbloquearOrdenUnidades() {
+  const email = (($("#email-secretaria") && $("#email-secretaria").value) || "").trim().toLowerCase();
+  if (!email) {
+    toast("Ingresá el correo de Secretaría.");
+    return;
+  }
+  const allow = (state.correosOrdenUnidades || []).map((e) => String(e).toLowerCase());
+  if (!allow.includes(email)) {
+    toast("Ese correo no puede cambiar el orden de unidades.");
+    return;
+  }
+  state.emailSecretaria = email;
+  sessionStorage.setItem(EMAIL_SECRETARIA_KEY, email);
+  renderPanelOrdenUnidades();
+  toast("Orden de unidades desbloqueado.");
+}
+
+async function moverUnidad(unidad, delta) {
+  if (!puedeOrdenarUnidades()) {
+    toast("Desbloqueá con el correo de Secretaría para cambiar el orden de unidades.");
+    return;
+  }
+  const unidades = (state.ordenUnidades || []).slice();
+  const i = unidades.findIndex((u) => u === unidad);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= unidades.length) return;
+  const tmp = unidades[i];
+  unidades[i] = unidades[j];
+  unidades[j] = tmp;
+  try {
+    const res = await api("/api/actas/" + state.acta + "/orden-unidades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: state.emailSecretaria, unidades }),
+    });
+    state.ordenUnidades = res.unidades || unidades;
+    await elegirActa(state.acta, false);
+    toast("Orden de unidades actualizado.");
+  } catch (err) {
+    toast(err.message);
+  }
 }
 
 function tablaTemas(filas, conOrden) {
@@ -663,6 +775,17 @@ $("#btn-od").addEventListener("click", descargarOD);
 $("#btn-od-inicio").addEventListener("click", descargarOD);
 $("#btn-preview").addEventListener("click", verPreview);
 $("#btn-conectar").addEventListener("click", conectarPlanilla);
+const btnDesbloquear = $("#btn-desbloquear-unidades");
+if (btnDesbloquear) btnDesbloquear.addEventListener("click", desbloquearOrdenUnidades);
+const emailSecretaria = $("#email-secretaria");
+if (emailSecretaria) {
+  emailSecretaria.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      desbloquearOrdenUnidades();
+    }
+  });
+}
 $("#buscar-global").addEventListener("input", () => {
   clearTimeout(_buscaT);
   _buscaT = setTimeout(buscarGlobal, 250);

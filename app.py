@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from catalogo import (
     ACTAS,
+    CORREOS_ORDEN_UNIDADES,
     CVAR_CARGADOS,
     CVAR_DRIVE,
     DRIVE,
@@ -30,6 +31,7 @@ from catalogo import (
     TIPOS_CON_DIRECTOR,
     TIPOS_CON_PUNTAJE,
     UNIDADES,
+    correo_orden_unidades,
     estado_acta,
     etiqueta_estado,
 )
@@ -42,12 +44,22 @@ from sheets_client import (
     guardar_cuenta_servicio,
     guardar_ensayo_publicacion,
     guardar_ensayo_tema,
+    guardar_orden_unidades,
     leer_cache_planilla,
     leer_ensayos,
     leer_hoja2,
+    leer_orden_unidades,
     reset_conexion,
 )
-from word_docs import aplicar_orden_manual, construir_informe, construir_od, fingerprint, parsear_od_docx, unidad_de
+from word_docs import (
+    aplicar_orden_od,
+    construir_informe,
+    construir_od,
+    fingerprint,
+    parsear_od_docx,
+    unidad_de,
+    unidades_en_orden,
+)
 
 STATIC = ROOT / "static"
 ASSETS = ROOT / "assets"
@@ -59,6 +71,7 @@ if ASSETS.is_dir():
     app.mount("/brand", StaticFiles(directory=str(ASSETS)), name="brand")
 
 _orden_manual = {}  # type: Dict[int, List[str]]
+_orden_unidades = {}  # type: Dict[int, List[str]]
 _cache_hoja = {"rows": None, "error": None}  # type: Dict[str, Any]
 
 
@@ -90,6 +103,11 @@ class TemaIn(BaseModel):
 
 class OrdenIn(BaseModel):
     fingerprints: List[str]
+
+
+class OrdenUnidadesIn(BaseModel):
+    email: str
+    unidades: List[str]
 
 
 class PublicacionIn(BaseModel):
@@ -150,6 +168,31 @@ def _temas_acta(numero: int) -> List[Dict[str, Any]]:
         if _num_acta(extra.get("numero_acta")) == numero:
             temas.append(extra)
     return temas
+
+
+def _obtener_orden_unidades(numero: int, temas: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    """Orden de bloques de unidad: memoria → planilla → aparición actual."""
+    if numero in _orden_unidades and _orden_unidades[numero]:
+        return list(_orden_unidades[numero])
+    info = estado_conexion()
+    if info["sheets_ok"]:
+        try:
+            guardado = leer_orden_unidades(numero)
+            if guardado:
+                _orden_unidades[numero] = list(guardado)
+                return list(guardado)
+        except Exception:
+            pass
+    base = temas if temas is not None else _temas_acta(numero)
+    return unidades_en_orden(aplicar_orden_od(base, _orden_manual.get(numero), None))
+
+
+def _temas_ordenados(numero: int) -> List[Dict[str, Any]]:
+    temas = _temas_acta(numero)
+    orden_u = _obtener_orden_unidades(numero, temas)
+    ordenados = aplicar_orden_od(temas, _orden_manual.get(numero), orden_u)
+    _orden_manual[numero] = [fingerprint(r) for r in ordenados]
+    return ordenados
 
 
 def _tema_publico(r: Dict[str, Any], idx: int) -> Dict[str, Any]:
@@ -275,11 +318,13 @@ def api_actualizar():
 def api_acta(numero: int):
     if numero not in ACTAS:
         raise HTTPException(404, "Acta inexistente")
-    temas = aplicar_orden_manual(_temas_acta(numero), _orden_manual.get(numero))
-    _orden_manual[numero] = [fingerprint(r) for r in temas]
+    temas = _temas_ordenados(numero)
     return {
         "acta": _resumen_acta(numero),
         "temas": [_tema_publico(r, i) for i, r in enumerate(temas)],
+        "orden_unidades": _obtener_orden_unidades(numero, temas),
+        "puede_ordenar_unidades": True,
+        "correos_orden_unidades": sorted(CORREOS_ORDEN_UNIDADES),
         "responsables": sorted(
             {
                 str(_norm(r).get("responsable_de_carga") or "").strip()
@@ -323,7 +368,7 @@ def api_buscar(q: str = ""):
 def api_preview(numero: int):
     if numero not in ACTAS:
         raise HTTPException(404, "Acta inexistente")
-    temas = aplicar_orden_manual(_temas_acta(numero), _orden_manual.get(numero))
+    temas = _temas_ordenados(numero)
     items = []
     unidad_actual = None
     n = 1
@@ -413,6 +458,82 @@ def api_orden(numero: int, body: OrdenIn):
         raise HTTPException(400, "Solo se reordenan los temas del acta en curso.")
     _orden_manual[numero] = body.fingerprints
     return {"ok": True}
+
+
+@app.get("/api/actas/{numero}/orden-unidades")
+def api_get_orden_unidades(numero: int):
+    if numero not in ACTAS:
+        raise HTTPException(404, "Acta inexistente")
+    temas = _temas_acta(numero)
+    unidades = _obtener_orden_unidades(numero, temas)
+    # Solo unidades que realmente tienen temas, en el orden guardado + las nuevas al final.
+    presentes = unidades_en_orden(temas)
+    presentes_cf = {u.casefold(): u for u in presentes}
+    orden = []
+    vistos = set()
+    for u in unidades:
+        key = (u or "").casefold()
+        if key in presentes_cf and key not in vistos:
+            orden.append(presentes_cf[key])
+            vistos.add(key)
+    for u in presentes:
+        key = u.casefold()
+        if key not in vistos:
+            orden.append(u)
+            vistos.add(key)
+    return {
+        "ok": True,
+        "unidades": orden,
+        "correos_orden_unidades": sorted(CORREOS_ORDEN_UNIDADES),
+    }
+
+
+@app.post("/api/actas/{numero}/orden-unidades")
+def api_post_orden_unidades(numero: int, body: OrdenUnidadesIn):
+    if numero not in ACTAS:
+        raise HTTPException(404, "Acta inexistente")
+    if estado_acta(numero) != "en_curso":
+        raise HTTPException(400, "Solo se reordena el Orden del Día del acta en curso.")
+    email = (body.email or "").strip().lower()
+    if not correo_orden_unidades(email):
+        raise HTTPException(
+            403,
+            "Solo Secretaría (investigacion@ o asistente.inv@) puede cambiar el orden de unidades.",
+        )
+    temas = _temas_acta(numero)
+    presentes = unidades_en_orden(temas)
+    if not presentes:
+        raise HTTPException(400, "Esta acta todavía no tiene unidades con temas.")
+    presentes_cf = {u.casefold(): u for u in presentes}
+    pedidas = [(u or "").strip() for u in body.unidades if (u or "").strip()]
+    if not pedidas:
+        raise HTTPException(400, "Falta la lista de unidades.")
+    orden = []
+    vistos = set()
+    for u in pedidas:
+        key = u.casefold()
+        if key not in presentes_cf:
+            raise HTTPException(400, "La unidad «{}» no tiene temas en esta acta.".format(u))
+        if key in vistos:
+            continue
+        orden.append(presentes_cf[key])
+        vistos.add(key)
+    for u in presentes:
+        key = u.casefold()
+        if key not in vistos:
+            orden.append(u)
+            vistos.add(key)
+    _orden_unidades[numero] = orden
+    info = estado_conexion()
+    if info["sheets_ok"]:
+        try:
+            guardar_orden_unidades(numero, orden, email)
+        except Exception as exc:
+            raise HTTPException(
+                503,
+                "No se pudo guardar el orden de unidades en la planilla. ({})".format(exc),
+            ) from exc
+    return {"ok": True, "unidades": orden, "guardado_por": email}
 
 
 def _validar(numero: int, body: TemaIn) -> List[str]:
@@ -565,7 +686,7 @@ def api_cargar(numero: int, body: TemaIn):
 def api_od(numero: int):
     if numero not in ACTAS:
         raise HTTPException(404, "Acta inexistente")
-    temas = aplicar_orden_manual(_temas_acta(numero), _orden_manual.get(numero))
+    temas = _temas_ordenados(numero)
     if not temas:
         raise HTTPException(400, "Esta acta todavía no tiene temas.")
     data = construir_od(numero, temas)
@@ -590,7 +711,7 @@ def api_informe(numero: int, responsable: str = Query(...)):
     ]
     if not temas:
         raise HTTPException(404, "No hay temas de ese responsable en esta acta.")
-    data = construir_informe(numero, nombre, aplicar_orden_manual(temas, None))
+    data = construir_informe(numero, nombre, aplicar_orden_od(temas, None, _obtener_orden_unidades(numero)))
     seguro = "".join(c if c.isalnum() or c in "._-" else "_" for c in nombre)
     return Response(
         content=data,

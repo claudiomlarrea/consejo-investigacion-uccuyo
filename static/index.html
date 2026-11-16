@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css?v=39">
+  <link rel="stylesheet" href="/static/styles.css?v=40">
   <style>.hero-copy{opacity:0;transform:translate3d(-36vw,0,0)}</style>
 </head>
 <body>
@@ -120,6 +120,22 @@
           <input id="buscar-global" type="search" placeholder="Título, unidad, director o responsable">
         </label>
         <div id="resultados-global" class="resultados-global" hidden></div>
+      </div>
+      <div class="wrap panel-orden-unidades" id="panel-orden-unidades" hidden>
+        <div class="panel-orden-unidades-head">
+          <div>
+            <h2>Orden de unidades en el Orden del Día</h2>
+            <p id="orden-unidades-ayuda">Solo Secretaría puede cambiar el orden de las unidades. Los consejeros siguen reordenando temas dentro de su unidad con las flechas ↑↓.</p>
+          </div>
+          <div class="desbloqueo-secretaria" id="desbloqueo-secretaria">
+            <label>Correo de Secretaría
+              <input id="email-secretaria" type="email" autocomplete="username" placeholder="investigacion@uccuyo.edu.ar">
+            </label>
+            <button type="button" class="btn btn-navy" id="btn-desbloquear-unidades">Desbloquear</button>
+          </div>
+          <p class="orden-unidades-activa hidden" id="orden-unidades-activa"></p>
+        </div>
+        <ol id="lista-orden-unidades" class="lista-orden-unidades"></ol>
       </div>
       <div class="wrap" id="lista-temas"></div>
     </section>
@@ -249,6 +265,6 @@
   </footer>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/static/app.js?v=39"></script>
+  <script src="/static/app.js?v=40"></script>
 </body>
 </html>

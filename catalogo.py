@@ -137,7 +137,31 @@ SHEET_URL = (
 )
 TAB_HOJA2 = "Hoja 2"
 TAB_PUBLICACIONES = "publicaciones_sheet"
+TAB_ORDEN_UNIDADES = "Orden_unidades"
 LIBRO_NOMBRE = "Datos Consejo Investigación"
+
+# Solo estos correos pueden reordenar bloques de unidades en el OD.
+# Claudio (Secretaría) y Stefania Young (asistente). Env CORREOS_ORDEN_UNIDADES puede sumar más.
+CORREOS_ORDEN_UNIDADES = {
+    "investigacion@uccuyo.edu.ar",
+    "asistente.inv@uccuyo.edu.ar",
+}
+
+
+def correo_orden_unidades(email: str) -> bool:
+    """True si el correo puede cambiar el orden de unidades académicas del OD."""
+    import os
+
+    e = (email or "").strip().lower()
+    if not e or "@" not in e:
+        return False
+    permitidos = set(CORREOS_ORDEN_UNIDADES)
+    extra = os.environ.get("CORREOS_ORDEN_UNIDADES") or ""
+    for parte in extra.split(","):
+        p = parte.strip().lower()
+        if p:
+            permitidos.add(p)
+    return e in permitidos
 
 
 def _parse_fecha(texto: str) -> Optional[date]:
