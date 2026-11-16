@@ -498,7 +498,7 @@ def api_post_orden_unidades(numero: int, body: OrdenUnidadesIn):
     if not correo_orden_unidades(email):
         raise HTTPException(
             403,
-            "Solo Secretaría (investigacion@ o asistente.inv@) puede cambiar el orden de unidades.",
+            "Solo Secretaría (investigacion@, asistente.inv@ o vincutec@) puede cambiar el orden de unidades.",
         )
     temas = _temas_acta(numero)
     presentes = unidades_en_orden(temas)

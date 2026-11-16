@@ -145,6 +145,7 @@ LIBRO_NOMBRE = "Datos Consejo Investigación"
 CORREOS_ORDEN_UNIDADES = {
     "investigacion@uccuyo.edu.ar",
     "asistente.inv@uccuyo.edu.ar",
+    "vincutec@uccuyo.edu.ar",
 }
 
 

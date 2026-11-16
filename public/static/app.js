@@ -10,7 +10,11 @@ const state = {
   sheetsOk: false,
   ordenUnidades: [],
   emailSecretaria: (sessionStorage.getItem(EMAIL_SECRETARIA_KEY) || "").trim().toLowerCase(),
-  correosOrdenUnidades: ["investigacion@uccuyo.edu.ar", "asistente.inv@uccuyo.edu.ar"],
+  correosOrdenUnidades: [
+    "investigacion@uccuyo.edu.ar",
+    "asistente.inv@uccuyo.edu.ar",
+    "vincutec@uccuyo.edu.ar",
+  ],
 };
 
 const $ = (sel) => document.querySelector(sel);
