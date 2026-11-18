@@ -119,6 +119,7 @@ class AulaIn(BaseModel):
     tema: Optional[int] = None
     titulos: List[str] = Field(default_factory=list)
     micro: bool = False
+    reemplazar: bool = False
     senal: Optional[Dict[str, str]] = None
     rev: Optional[int] = None
 
@@ -336,6 +337,25 @@ def temas_desde_archivo(nombre: str, contenido: bytes) -> List[str]:
     if len(contenido) > 4_000_000:
         raise ValueError("El archivo pesa más de 4 MB.")
     if bajo.endswith(".docx"):
+        from word_docs import parsear_od_docx
+
+        oficiales = []
+        try:
+            oficiales = parsear_od_docx(contenido, 0, "")
+        except Exception:
+            oficiales = []
+        titulos = []
+        for tema in oficiales:
+            titulo = " ".join(str(tema.get("titulo") or "").split())
+            if not titulo:
+                continue
+            tipo = " ".join(str(tema.get("tipo") or "").split())
+            linea = (tipo + " — " + titulo) if tipo else titulo
+            titulos.append(linea[:180].rstrip())
+            if len(titulos) >= 40:
+                break
+        if titulos:
+            return titulos
         from docx import Document
 
         documento = Document(BytesIO(contenido))
@@ -405,7 +425,7 @@ async def api_aula_temas(
         raise HTTPException(400, "Entrá con tu nombre y tu función para cargar los temas.")
     try:
         titulos = temas_desde_archivo(archivo.filename or "", await archivo.read())
-        cuerpo = {"client": client, "accion": "cargar", "titulos": titulos}
+        cuerpo = {"client": client, "accion": "cargar", "titulos": titulos, "reemplazar": True}
         if rev.strip():
             cuerpo["rev"] = int(rev)
         return aula.aplicar(codigo, cuerpo)

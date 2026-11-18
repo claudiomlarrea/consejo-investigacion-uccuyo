@@ -214,6 +214,7 @@ def _asegurar_forma(sala: Dict[str, Any]) -> None:
     sala.setdefault("voces", {})
     sala.setdefault("senales", [])
     sala.setdefault("senal_seq", 0)
+    sala.setdefault("cerrada", False)
     if isinstance(sala.get("acta"), int):
         sala["acta"] = str(sala["acta"])
     sala.setdefault("acta", "")
@@ -391,6 +392,7 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
             for item in (sala.get("senales") or [])
             if isinstance(item, dict) and str(item.get("para") or "") == client
         ],
+        "cerrada": bool(sala.get("cerrada")),
     }
 
 
@@ -577,6 +579,9 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         if not isinstance(titulos, list):
             raise AulaError(400, "Ese archivo no tiene temas.")
         agregados = 0
+        if body.get("reemplazar"):
+            sala["temas"] = []
+            sala["tema"] = 0
         for titulo in titulos:
             limpio = " ".join(str(titulo).split())
             if not limpio:
@@ -648,6 +653,18 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
             del lista[:-30]
         return True
 
+    if accion == "cerrar":
+        _exigir_adentro(sala, client)
+        sala["cerrada"] = True
+        sala["turno"] = None
+        sala["cola"] = []
+        return True
+
+    if accion == "reabrir":
+        _exigir_adentro(sala, client)
+        sala["cerrada"] = False
+        return True
+
     raise AulaError(400, "Acción desconocida.")
 
 
@@ -690,6 +707,8 @@ class _Almacen:
             self._elegir()
             if self._modo == "drive":
                 data = self._leer_drive()
+            elif self._modo == "hoja":
+                data = self._leer_hoja()
             else:
                 data = self._leer_archivo()
             if not isinstance(data, dict):
@@ -728,6 +747,14 @@ class _Almacen:
                     ultimo = exc
                     time.sleep(0.3)
             if ultimo is not None:
+                self._degradado = True
+                if self._cache is None:
+                    self._cache = data
+                raise AulaError(503, "No pude guardar la sala. La reunión sigue en pie: reintentá.")
+        elif self._modo == "hoja":
+            try:
+                self._escribir_hoja(data)
+            except Exception:
                 self._degradado = True
                 if self._cache is None:
                     self._cache = data
@@ -939,21 +966,108 @@ class _Almacen:
         return None
 
     def _elegir(self) -> None:
-        if self._modo == "local" and time.time() < self._drive_hasta:
-            return
         if self._modo == "drive" and self._session is not None:
             return
-        sesion = _sesion_drive()
-        if sesion is None:
-            self._modo = "local"
+        if self._modo == "hoja":
             return
-        self._session = sesion
+        if self._modo == "local" and time.time() < self._drive_hasta:
+            return
+        sesion = _sesion_drive()
+        if sesion is not None:
+            self._session = sesion
+            try:
+                self._file_id = self._buscar_o_crear()
+                self._modo = "drive"
+                return
+            except Exception:
+                self._session = None
+                self._file_id = None
+        if self._hoja_disponible():
+            self._modo = "hoja"
+            return
+        self._modo = "local"
+        self._drive_hasta = time.time() + 30
+
+    def _hoja_aula(self, crear: bool = False):
+        import gspread
+        from catalogo import SHEET_ID
+        from sheets_client import conectar
+        import sheets_client
+
+        ok, err = conectar()
+        if not ok or sheets_client._client is None:
+            raise RuntimeError(err or "sin planilla")
+        libro = sheets_client._client.open_by_key(SHEET_ID)
         try:
-            self._file_id = self._buscar_o_crear()
-            self._modo = "drive"
+            hoja = libro.worksheet("Aula_salas")
+        except gspread.exceptions.WorksheetNotFound:
+            if not crear:
+                return None
+            hoja = libro.add_worksheet(title="Aula_salas", rows=200, cols=3)
+            hoja.update("A1:C1", [["codigo", "estado", "actualizado"]], value_input_option="RAW")
+        if hoja.title != "Aula_salas":
+            raise RuntimeError("La hoja del aula no es la esperada.")
+        return hoja
+
+    def _hoja_disponible(self) -> bool:
+        try:
+            from sheets_client import conectar
+            ok, _err = conectar()
+            return bool(ok)
         except Exception:
-            self._modo = "local"
-            self._drive_hasta = time.time() + 60
+            return False
+
+    def _leer_hoja(self) -> Dict[str, Any]:
+        hoja = self._hoja_aula(crear=False)
+        if hoja is None:
+            return {}
+        valores = hoja.get_all_values()
+        data: Dict[str, Any] = {}
+        for fila in valores[1:]:
+            if len(fila) < 2 or not fila[0]:
+                continue
+            try:
+                sala = json.loads(fila[1])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(sala, dict):
+                sala.pop("senales", None)
+                data[str(fila[0])] = sala
+        return data
+
+    def _escribir_hoja(self, data: Dict[str, Any]) -> None:
+        hoja = self._hoja_aula(crear=True)
+        if hoja is None or hoja.title != "Aula_salas":
+            raise AulaError(503, "No pude guardar la sala.")
+        cuerpo = [["codigo", "estado", "actualizado"]]
+        for codigo, sala in data.items():
+            if not isinstance(sala, dict):
+                continue
+            limpia = json.loads(json.dumps(sala))
+            limpia.pop("senales", None)
+            texto = json.dumps(limpia, ensure_ascii=False)
+            if len(texto) > 45000:
+                texto = json.dumps(
+                    {
+                        "rev": limpia.get("rev") or 0,
+                        "organo": limpia.get("organo") or "",
+                        "unidad": limpia.get("unidad") or "",
+                        "acta": limpia.get("acta") or "",
+                        "temas": limpia.get("temas") or [],
+                        "tema": limpia.get("tema") or 0,
+                        "cerrada": bool(limpia.get("cerrada")),
+                        "presentes": limpia.get("presentes") or {},
+                        "ocupantes": limpia.get("ocupantes") or {},
+                        "turno": limpia.get("turno"),
+                        "cola": limpia.get("cola") or [],
+                        "meet": limpia.get("meet") or "",
+                        "actualizado": limpia.get("actualizado") or "",
+                    },
+                    ensure_ascii=False,
+                )
+            cuerpo.append([codigo, texto, str(sala.get("actualizado") or "")])
+        hoja.batch_clear(["A1:C200"])
+        hoja.update("A1", cuerpo, value_input_option="RAW")
 
     def _ruta(self):
         from sheets_client import DATA_DIR

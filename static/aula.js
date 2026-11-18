@@ -128,7 +128,7 @@ function pintarSala() {
   const sala = state.room;
   if (!sala) return;
   const sync = $("sync");
-  const compartida = sala.sync === "drive";
+  const compartida = sala.sync === "drive" || sala.sync === "hoja";
   sync.textContent = (compartida ? "Sala compartida" : sala.sync === "degradado" ? "Reconectando" : "Sala de este servidor")
     + " · " + (sala.presentes || 0) + "/" + (sala.cupo || 100);
   sync.classList.toggle("is-off", !compartida);
@@ -325,15 +325,23 @@ function pintarAgenda() {
   $("agenda-kicker").textContent = partes.concat(acta ? [acta] : []).join(" · ") || "Para comenzar";
   $("agenda-titulo").textContent = items.length
     ? items[indice]
-    : "Agregá los temas cuando la reunión haya comenzado.";
-  $("agenda-meta").textContent = sala.organo
-    ? "Los temas se escriben acá o se cargan desde un Word o un PDF."
-    : "Elegí el órgano, la unidad y el número de acta, y tocá Comenzar reunión. Los temas se cargan desde un Word o un PDF.";
+    : "Todavía no hay temas en el orden del día.";
+  const aviso = $("agenda-aviso");
+  if (sala.cerrada) {
+    $("agenda-meta").textContent = "La reunión está cerrada. Los temas quedan a la vista.";
+  } else if (items.length) {
+    $("agenda-meta").textContent = "El orden del día tiene " + items.length + (items.length === 1 ? " tema." : " temas.");
+  } else {
+    $("agenda-meta").textContent = "Elegí el Word o el PDF del orden del día. Los temas aparecen acá arriba.";
+  }
+  if (aviso && !aviso.dataset.fijo) aviso.textContent = "";
   const botonReunion = $("btn-reunion");
   if (botonReunion) botonReunion.textContent = sala.organo ? "Actualizar reunión" : "Comenzar reunión";
+  const botonCerrar = $("btn-cerrar");
+  if (botonCerrar) botonCerrar.textContent = sala.cerrada ? "Reabrir reunión" : "Cerrar reunión";
   const lead = $("guia-lead");
   if (lead) {
-    if (sala.sync !== "drive" && location.hostname === "consejo-investigacion.vercel.app") {
+    if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
       lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión: seguís en el aula, en la sala compartida.";
     } else if (!sala.organo) {
       lead.textContent = "Ya estás en la reunión, en esta aula. Completá los datos y tocá Comenzar reunión. El micrófono se enciende acá.";
@@ -573,10 +581,40 @@ async function cargarArchivo() {
     input.value = "";
     pintarSala();
     const cantidad = (state.room.temas || []).length;
-    decir("Temas cargados. El orden del día tiene " + cantidad + ".");
+    const texto = "Temas cargados. El orden del día tiene " + cantidad + ".";
+    const aviso = $("agenda-aviso");
+    if (aviso) {
+      aviso.dataset.fijo = "1";
+      aviso.textContent = texto;
+    }
+    decir(texto);
+    const titulo = $("agenda-titulo");
+    if (titulo) titulo.scrollIntoView({ block: "center" });
   } catch (err) {
+    const aviso = $("agenda-aviso");
+    if (aviso) {
+      aviso.dataset.fijo = "1";
+      aviso.textContent = err.message;
+    }
     decir(err.message);
   }
+}
+
+async function cerrarReunion() {
+  if (!state.room || !state.room.adentro) {
+    decir("Entrá con tu nombre y tu función para cerrar la reunión.");
+    $("nombre").focus();
+    return;
+  }
+  const cerrar = !state.room.cerrada;
+  await enviar(cerrar ? "cerrar" : "reabrir");
+  const texto = state.room && state.room.cerrada ? "Reunión cerrada." : "La reunión sigue abierta.";
+  const aviso = $("agenda-aviso");
+  if (aviso) {
+    aviso.dataset.fijo = "1";
+    aviso.textContent = texto;
+  }
+  decir(texto);
 }
 
 async function agregarTema(event) {
@@ -592,7 +630,7 @@ async function agregarTema(event) {
 }
 
 function origenCompartido() {
-  if (state.room && state.room.sync === "drive") return location.origin;
+  if (state.room && (state.room.sync === "drive" || state.room.sync === "hoja")) return location.origin;
   if (location.hostname === "consejo-investigacion.vercel.app") {
     return "https://consejo-investigacion-uccuyo.vercel.app";
   }
@@ -836,6 +874,10 @@ async function iniciar() {
   $("form-meet").addEventListener("submit", guardarMeet);
   $("btn-micro").addEventListener("click", encenderMicrofono);
   $("btn-archivo").addEventListener("click", cargarArchivo);
+  $("archivo-temas").addEventListener("change", () => {
+    if ($("archivo-temas").files && $("archivo-temas").files.length) cargarArchivo();
+  });
+  $("btn-cerrar").addEventListener("click", cerrarReunion);
 
   if (!state.sala) {
     decir("Pegá el enlace de Meet del calendario y tocá Entrar a la reunión.");

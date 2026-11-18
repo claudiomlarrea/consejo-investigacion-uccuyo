@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=10">
+  <link rel="stylesheet" href="/static/aula.css?v=11">
 </head>
 <body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
@@ -83,6 +83,7 @@
           <input id="acta" maxlength="24" placeholder="El de esta unidad">
         </label>
         <button type="submit" class="btn btn-oro" id="btn-reunion">Comenzar reunión</button>
+        <button type="button" class="btn btn-fantasma" id="btn-cerrar">Cerrar reunión</button>
       </form>
       <div class="telon-cabeza">
         <p class="kicker" id="agenda-kicker">Reunión</p>
@@ -95,6 +96,8 @@
       </div>
       <h1 id="agenda-titulo">Agregá los temas de esta reunión.</h1>
       <p class="meta" id="agenda-meta">Los temas se escriben acá o se cargan desde un Word o un PDF.</p>
+      <p class="meta" id="agenda-aviso"></p>
+      <ol class="lista" id="agenda-lista"></ol>
       <div class="telon-nav">
         <button type="button" class="btn btn-fantasma" id="btn-anterior">Tema anterior</button>
         <button type="button" class="btn btn-oro" id="btn-siguiente">Tema siguiente</button>
@@ -108,7 +111,6 @@
         </label>
         <button type="button" class="btn btn-oro" id="btn-archivo">Cargar temas</button>
       </form>
-      <ol class="lista" id="agenda-lista"></ol>
     </section>
 
     <section class="camara" aria-label="Mesa de la reunión">
@@ -134,6 +136,6 @@
   </main>
 
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=10"></script>
+  <script src="/static/aula.js?v=11"></script>
 </body>
 </html>
