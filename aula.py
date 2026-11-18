@@ -41,7 +41,12 @@ ROLES = {
 ARCHIVO = "consejo-aula-salas.json"
 _CODIGO = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 _MEET = re.compile(r"^[a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4}$")
-_LOCK = threading.Lock()
+CUPO = 100
+PRESENCIA_SEG = 90
+_CACHE_S = 2.5
+_FLUSH_S = 8
+_FRAME_MAX = 180_000
+_WRITE = threading.Lock()
 
 
 def sugerir_acta(hoy: Optional[date] = None) -> int:
@@ -104,6 +109,8 @@ def _nueva(acta: int) -> Dict[str, Any]:
         "turno": None,
         "cola": [],
         "ocupantes": {},
+        "presentes": {},
+        "pantalla": None,
         "actualizado": _ahora(),
     }
 
@@ -147,6 +154,61 @@ def _limpiar_nombre(nombre: str) -> str:
     return limpio
 
 
+def _ahora_s() -> int:
+    return int(time.time())
+
+
+def _asegurar_forma(sala: Dict[str, Any]) -> None:
+    sala.setdefault("presentes", {})
+    sala.setdefault("pantalla", None)
+    if sala["presentes"]:
+        return
+    ahora = _ahora_s()
+    for ocupante in sala.get("ocupantes", {}).values():
+        cid = str(ocupante.get("client") or "")
+        if cid:
+            sala["presentes"][cid] = {"nombre": ocupante.get("nombre") or "", "visto": ahora}
+
+
+def _vivos(sala: Dict[str, Any], ahora: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+    ahora = _ahora_s() if ahora is None else ahora
+    _asegurar_forma(sala)
+    vivos = {}
+    for cid, persona in sala["presentes"].items():
+        if ahora - int(persona.get("visto") or 0) <= PRESENCIA_SEG:
+            vivos[cid] = persona
+    return vivos
+
+
+def _purgar(sala: Dict[str, Any]) -> None:
+    ahora = _ahora_s()
+    vivos = _vivos(sala, ahora)
+    sala["presentes"] = vivos
+    for clave, ocupante in list(sala["ocupantes"].items()):
+        if str(ocupante.get("client") or "") not in vivos:
+            asiento = int(clave)
+            sala["ocupantes"].pop(clave, None)
+            _quitar_de_cola(sala, asiento)
+            if sala.get("turno") == asiento:
+                sala["turno"] = sala["cola"].pop(0) if sala["cola"] else None
+    pantalla = sala.get("pantalla") or None
+    if pantalla and str(pantalla.get("client") or "") not in vivos:
+        sala["pantalla"] = None
+
+
+def _marcar(sala: Dict[str, Any], client: str, nombre: str) -> None:
+    _purgar(sala)
+    persona = sala["presentes"].get(client)
+    if persona is None:
+        if len(sala["presentes"]) >= CUPO:
+            raise AulaError(403, "La sala está llena (100 personas).")
+        persona = {"nombre": nombre, "visto": _ahora_s()}
+        sala["presentes"][client] = persona
+    persona["visto"] = _ahora_s()
+    if nombre:
+        persona["nombre"] = nombre
+
+
 def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[str, Any]:
     mio = _asiento_de(sala, client)
     asientos = []
@@ -163,10 +225,21 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
             }
         )
     turno = sala.get("turno")
+    vivos = _vivos(sala)
+    roster = []
+    for cid, persona in sorted(vivos.items(), key=lambda kv: (kv[1].get("nombre") or "").casefold()):
+        roster.append({"nombre": persona.get("nombre") or "Sin nombre", "propio": cid == client})
+    pantalla = sala.get("pantalla") or None
+    if pantalla and str(pantalla.get("client") or "") not in vivos:
+        pantalla = None
     return {
         "codigo": codigo,
         "rev": sala["rev"],
         "sync": sync,
+        "cupo": CUPO,
+        "presentes": len(vivos),
+        "adentro": client in vivos,
+        "roster": roster,
         "meet_url": enlace_meet(codigo),
         "acta": sala["acta"],
         "mes": ACTAS.get(sala["acta"]),
@@ -179,16 +252,45 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
         "asientos": asientos,
         "conduzco": _conduce(sala, client) if client else not _hay_mesa(sala),
         "sentado": mio,
+        "pantalla": None
+        if not pantalla
+        else {
+            "activa": True,
+            "nombre": pantalla.get("nombre") or "",
+            "propia": str(pantalla.get("client") or "") == client,
+        },
     }
 
 
-def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> None:
+def _cliente(body: Dict[str, Any]) -> str:
     client = str(body.get("client") or "")
     if len(client) < 8 or len(client) > 80:
         raise AulaError(400, "Falta la identificación de este navegador.")
+    return client
+
+
+def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
+    """Devuelve True si el cambio tiene que verse al instante (sube rev)."""
+    client = _cliente(body)
     accion = str(body.get("accion") or "")
-    if body.get("rev") is not None and int(body["rev"]) != sala["rev"]:
-        raise AulaError(409, "Otro consejero acaba de actualizar la sala.")
+    _asegurar_forma(sala)
+    if accion not in ("pulso", "entrar", "pantalla", "cortar"):
+        if body.get("rev") is not None and int(body["rev"]) != sala["rev"]:
+            raise AulaError(409, "Otro consejero acaba de actualizar la sala.")
+
+    if accion == "pulso":
+        if client not in _vivos(sala):
+            nombre = _limpiar_nombre(str(body.get("nombre") or "")) if body.get("nombre") else ""
+            if not nombre:
+                return False
+            _marcar(sala, client, nombre)
+            return True
+        sala["presentes"][client]["visto"] = _ahora_s()
+        return False
+
+    if accion == "entrar":
+        _marcar(sala, client, _limpiar_nombre(str(body.get("nombre") or "")))
+        return True
 
     if accion == "sentarse":
         nombre = _limpiar_nombre(str(body.get("nombre") or ""))
@@ -198,6 +300,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> None:
             raise AulaError(400, "Elegí un asiento.")
         if asiento not in VISUAL:
             raise AulaError(400, "Ese asiento no existe.")
+        _marcar(sala, client, nombre)
         actual = sala["ocupantes"].get(str(asiento))
         if actual and actual.get("client") != client:
             raise AulaError(409, "Ese asiento acaba de ocuparse.")
@@ -207,32 +310,47 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> None:
             _quitar_de_cola(sala, previo)
             if sala.get("turno") == previo:
                 sala["turno"] = None
-        sala["ocupantes"][str(asiento)] = {"nombre": nombre, "client": client}
-        return
+        sala["ocupantes"][str(asiento)] = {"nombre": nombre, "client": client, "visto": _ahora_s()}
+        return True
 
     if accion == "salir":
         previo = _asiento_de(sala, client)
         if previo is None:
-            return
+            return False
         sala["ocupantes"].pop(str(previo), None)
         _quitar_de_cola(sala, previo)
         if sala.get("turno") == previo:
             sala["turno"] = None
             if sala["cola"]:
                 sala["turno"] = sala["cola"].pop(0)
-        return
+        return True
+
+    if accion == "pantalla":
+        if client not in _vivos(sala):
+            _marcar(sala, client, _limpiar_nombre(str(body.get("nombre") or "")))
+        nombre = (sala["presentes"].get(client) or {}).get("nombre") or _limpiar_nombre(str(body.get("nombre") or ""))
+        sala["pantalla"] = {"client": client, "nombre": nombre, "visto": _ahora_s()}
+        sala["presentes"][client]["visto"] = _ahora_s()
+        return True
+
+    if accion == "cortar":
+        pantalla = sala.get("pantalla") or {}
+        if str(pantalla.get("client") or "") == client:
+            sala["pantalla"] = None
+            return True
+        return False
 
     if accion == "palabra":
         asiento = _asiento_de(sala, client)
         if asiento is None:
             raise AulaError(403, "Sentate para pedir la palabra.")
         if sala.get("turno") == asiento or asiento in sala["cola"]:
-            return
+            return False
         if not _hay_mesa(sala) and sala.get("turno") is None:
             sala["turno"] = asiento
-            return
+            return True
         sala["cola"].append(asiento)
-        return
+        return True
 
     if accion == "conceder":
         if not _conduce(sala, client):
@@ -247,14 +365,14 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> None:
             raise AulaError(400, "Ese asiento está libre.")
         _quitar_de_cola(sala, asiento)
         sala["turno"] = asiento
-        return
+        return True
 
     if accion == "ceder":
         asiento = _asiento_de(sala, client)
         if sala.get("turno") != asiento and not _conduce(sala, client):
             raise AulaError(403, "Solo quien habla, o la mesa, puede cerrar el turno.")
         sala["turno"] = sala["cola"].pop(0) if sala["cola"] else None
-        return
+        return True
 
     if accion == "acta":
         if not _conduce(sala, client):
@@ -268,7 +386,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> None:
         if acta != sala["acta"]:
             sala["acta"] = acta
             sala["tema"] = 0
-        return
+        return True
 
     if accion == "ir":
         if not _conduce(sala, client):
@@ -280,7 +398,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> None:
         if tema < 0 or tema > 200:
             raise AulaError(400, "Ese tema no está en el orden del día.")
         sala["tema"] = tema
-        return
+        return True
 
     raise AulaError(400, "Acción desconocida.")
 
@@ -293,25 +411,55 @@ class _Almacen:
         self._file_id: Optional[str] = None
         self._session = None
         self._drive_hasta = 0.0
+        self._lecturas = threading.Condition()
+        self._leyendo = False
+        self._pulsos: Dict[str, Dict[str, int]] = {}
+        self._ultimo_flush = 0.0
+        self._frames: Dict[str, Tuple[bytes, float, str]] = {}
+        self._frame_ids: Dict[str, str] = {}
+        self._degradado = False
 
     def modo(self) -> str:
         self._elegir()
+        if self._degradado and self._modo == "drive":
+            return "degradado"
         return self._modo
 
     def leer(self, forzar: bool = False) -> Dict[str, Any]:
-        ahora = time.time()
-        if not forzar and self._cache is not None and ahora - self._cache_at < 1.0:
-            return json.loads(json.dumps(self._cache))
-        self._elegir()
-        if self._modo == "drive":
-            data = self._leer_drive()
-        else:
-            data = self._leer_archivo()
-        if not isinstance(data, dict):
-            data = {}
-        self._cache = data
-        self._cache_at = ahora
-        return json.loads(json.dumps(data))
+        with self._lecturas:
+            fresco = self._cache is not None and time.time() - self._cache_at < _CACHE_S
+            if not forzar and fresco:
+                return json.loads(json.dumps(self._cache))
+            if self._leyendo and not forzar:
+                self._lecturas.wait(timeout=6)
+                if self._cache is not None:
+                    return json.loads(json.dumps(self._cache))
+            self._leyendo = True
+        try:
+            self._elegir()
+            if self._modo == "drive":
+                data = self._leer_drive()
+            else:
+                data = self._leer_archivo()
+            if not isinstance(data, dict):
+                data = {}
+            self._degradado = False
+        except Exception:
+            self._degradado = self._modo == "drive"
+            with self._lecturas:
+                self._leyendo = False
+                self._lecturas.notify_all()
+            if self._cache is not None:
+                return json.loads(json.dumps(self._cache))
+            if self._modo == "drive":
+                raise AulaError(503, "La sala compartida no responde. Reintentá en unos segundos.")
+            return {}
+        with self._lecturas:
+            self._cache = data
+            self._cache_at = time.time()
+            self._leyendo = False
+            self._lecturas.notify_all()
+            return json.loads(json.dumps(data))
 
     def escribir(self, data: Dict[str, Any]) -> str:
         self._elegir()
@@ -319,17 +467,144 @@ class _Almacen:
             orden = sorted(data.items(), key=lambda kv: (kv[1] or {}).get("actualizado") or "")
             data = dict(orden[-40:])
         if self._modo == "drive":
-            try:
-                self._escribir_drive(data)
-            except Exception:
-                self._modo = "local"
-                self._drive_hasta = time.time() + 60
-                self._escribir_archivo(data)
+            ultimo = None
+            for _ in range(2):
+                try:
+                    self._escribir_drive(data)
+                    ultimo = None
+                    break
+                except Exception as exc:
+                    ultimo = exc
+                    time.sleep(0.3)
+            if ultimo is not None:
+                self._degradado = True
+                if self._cache is None:
+                    self._cache = data
+                raise AulaError(503, "No pude guardar la sala. La reunión sigue en pie: reintentá.")
         else:
             self._escribir_archivo(data)
-        self._cache = data
-        self._cache_at = time.time()
-        return self._modo
+        with self._lecturas:
+            self._cache = data
+            self._cache_at = time.time()
+        self._degradado = False
+        return self.modo()
+
+    def anotar_pulso(self, codigo: str, client: str, visto: int) -> None:
+        self._pulsos.setdefault(codigo, {})[client] = visto
+        with self._lecturas:
+            sala = (self._cache or {}).get(codigo)
+            if isinstance(sala, dict):
+                sala.setdefault("presentes", {}).setdefault(client, {})["visto"] = visto
+
+    def flush_pulsos(self, forzar: bool = False) -> None:
+        if not self._pulsos:
+            return
+        if not forzar and time.time() - self._ultimo_flush < _FLUSH_S:
+            return
+        pendientes = self._pulsos
+        self._pulsos = {}
+        self._ultimo_flush = time.time()
+        try:
+            data = self.leer(forzar=True)
+        except AulaError:
+            self._pulsos = pendientes
+            return
+        ahora = _ahora_s()
+        for codigo, vistos in pendientes.items():
+            sala = data.get(codigo)
+            if not isinstance(sala, dict):
+                continue
+            _asegurar_forma(sala)
+            for cid, visto in vistos.items():
+                persona = sala["presentes"].get(cid)
+                if persona is not None:
+                    persona["visto"] = max(int(persona.get("visto") or 0), int(visto))
+            _purgar(sala)
+            sala["actualizado"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            data[codigo] = sala
+        try:
+            self.escribir(data)
+        except AulaError:
+            for codigo, vistos in pendientes.items():
+                self._pulsos.setdefault(codigo, {}).update(vistos)
+            return
+        _ = ahora
+
+    def guardar_frame(self, codigo: str, client: str, blob: bytes) -> None:
+        if not blob.startswith(b"\xff\xd8") or len(blob) > _FRAME_MAX:
+            raise AulaError(400, "La pantalla tiene que ser una imagen chica.")
+        self._frames[codigo] = (blob, time.time(), client)
+        self._elegir()
+        if self._modo != "drive":
+            return
+        try:
+            fid = self._frame_ids.get(codigo) or self._frame_id(codigo)
+            self._frame_ids[codigo] = fid
+            respuesta = self._session.patch(
+                "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=media".format(fid),
+                data=blob,
+                headers={"Content-Type": "image/jpeg"},
+                timeout=6,
+            )
+            respuesta.raise_for_status()
+        except Exception:
+            return
+
+    def leer_frame(self, codigo: str) -> Optional[bytes]:
+        memoria = self._frames.get(codigo)
+        if memoria and time.time() - memoria[1] < 3:
+            return memoria[0]
+        self._elegir()
+        if self._modo != "drive":
+            return memoria[0] if memoria else None
+        try:
+            fid = self._frame_ids.get(codigo) or self._buscar_frame(codigo)
+            if not fid:
+                return memoria[0] if memoria else None
+            self._frame_ids[codigo] = fid
+            respuesta = self._session.get(
+                "https://www.googleapis.com/drive/v3/files/{}?alt=media".format(fid),
+                timeout=6,
+            )
+            if respuesta.status_code != 200 or not respuesta.content:
+                return memoria[0] if memoria else None
+            self._frames[codigo] = (respuesta.content, time.time(), "")
+            return respuesta.content
+        except Exception:
+            return memoria[0] if memoria else None
+
+    def _frame_id(self, codigo: str) -> str:
+        encontrado = self._buscar_frame(codigo)
+        if encontrado:
+            return encontrado
+        nombre = "consejo-aula-pantalla-{}.jpg".format(codigo)
+        boundary = "frame" + uuid.uuid4().hex
+        meta = json.dumps({"name": nombre, "mimeType": "image/jpeg"})
+        cuerpo = (
+            "--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n"
+            "--{b}\r\nContent-Type: image/jpeg\r\n\r\n"
+        ).format(b=boundary, meta=meta).encode("utf-8") + b"\xff\xd8\xff\xd9" + "\r\n--{}--\r\n".format(boundary).encode("utf-8")
+        creado = self._session.post(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+            data=cuerpo,
+            headers={"Content-Type": "multipart/related; boundary=" + boundary},
+            timeout=6,
+        )
+        creado.raise_for_status()
+        return creado.json()["id"]
+
+    def _buscar_frame(self, codigo: str) -> Optional[str]:
+        nombre = "consejo-aula-pantalla-{}.jpg".format(codigo)
+        q = quote("name = '{}' and trashed = false".format(nombre))
+        respuesta = self._session.get(
+            "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id)&pageSize=1".format(q),
+            timeout=6,
+        )
+        respuesta.raise_for_status()
+        archivos = respuesta.json().get("files") or []
+        if archivos:
+            return archivos[0]["id"]
+        return None
 
     def _elegir(self) -> None:
         if self._modo == "local" and time.time() < self._drive_hasta:
@@ -449,29 +724,88 @@ def _sala(data: Dict[str, Any], codigo: str, acta: Optional[int]) -> Tuple[Dict[
         sala = _nueva(acta or sugerir_acta())
         data[codigo] = sala
         return sala, True
+    _asegurar_forma(sala)
     return sala, False
 
 
 def obtener(codigo: str, acta: Optional[int] = None, client: str = "") -> Dict[str, Any]:
     codigo = normalizar_codigo(codigo)
-    with _LOCK:
+    try:
         data = _ALMACEN.leer()
-        sala, creada = _sala(data, codigo, acta)
-        modo = _ALMACEN.escribir(data) if creada else _ALMACEN.modo()
-        return _vista(codigo, sala, client, modo)
+    except AulaError:
+        raise
+    except Exception:
+        data = {}
+    sala, creada = _sala(data, codigo, acta)
+    if creada:
+        with _WRITE:
+            data = _ALMACEN.leer(forzar=True)
+            sala, creada = _sala(data, codigo, acta)
+            if creada:
+                modo = _ALMACEN.escribir(data)
+            else:
+                modo = _ALMACEN.modo()
+    else:
+        modo = _ALMACEN.modo()
+    return _vista(codigo, sala, client, modo)
 
 
 def aplicar(codigo: str, body: Dict[str, Any]) -> Dict[str, Any]:
     codigo = normalizar_codigo(codigo)
-    with _LOCK:
+    accion = str(body.get("accion") or "")
+    with _WRITE:
+        if accion == "pulso":
+            data = _ALMACEN.leer()
+            sala, _creada = _sala(data, codigo, None)
+            visible = _aplicar(sala, body)
+            client = str(body.get("client") or "")
+            if client in (sala.get("presentes") or {}):
+                _ALMACEN.anotar_pulso(codigo, client, int(sala["presentes"][client].get("visto") or _ahora_s()))
+            if visible:
+                sala["rev"] = int(sala.get("rev") or 0) + 1
+                sala["actualizado"] = _ahora()
+                data[codigo] = sala
+                modo = _ALMACEN.escribir(data)
+            else:
+                with _ALMACEN._lecturas:
+                    if isinstance(_ALMACEN._cache, dict):
+                        _ALMACEN._cache[codigo] = sala
+                modo = _ALMACEN.modo()
+            _ALMACEN.flush_pulsos()
+            return _vista(codigo, sala, client, modo)
         data = _ALMACEN.leer(forzar=True)
         sala, _creada = _sala(data, codigo, None)
-        _aplicar(sala, body)
-        sala["rev"] = int(sala.get("rev") or 0) + 1
-        sala["actualizado"] = _ahora()
+        visible = _aplicar(sala, body)
+        if visible:
+            sala["rev"] = int(sala.get("rev") or 0) + 1
+            sala["actualizado"] = _ahora()
         data[codigo] = sala
-        modo = _ALMACEN.escribir(data)
+        modo = _ALMACEN.escribir(data) if visible or _creada else _ALMACEN.modo()
+        if not visible and not _creada:
+            with _ALMACEN._lecturas:
+                if isinstance(_ALMACEN._cache, dict):
+                    _ALMACEN._cache[codigo] = sala
         return _vista(codigo, sala, str(body.get("client") or ""), modo)
+
+
+def guardar_pantalla(codigo: str, client: str, blob: bytes) -> None:
+    codigo = normalizar_codigo(codigo)
+    if len(client) < 8 or len(client) > 80:
+        raise AulaError(400, "Falta la identificación de este navegador.")
+    data = _ALMACEN.leer()
+    pantalla = (data.get(codigo) or {}).get("pantalla") if isinstance(data.get(codigo), dict) else None
+    if str((pantalla or {}).get("client") or "") != client:
+        data = _ALMACEN.leer(forzar=True)
+        sala = data.get(codigo) if isinstance(data.get(codigo), dict) else {}
+        pantalla = (sala or {}).get("pantalla") or {}
+    if str((pantalla or {}).get("client") or "") != client:
+        raise AulaError(403, "Solo quien está compartiendo puede enviar la pantalla.")
+    _ALMACEN.guardar_frame(codigo, client, blob)
+
+
+def leer_pantalla(codigo: str) -> Optional[bytes]:
+    codigo = normalizar_codigo(codigo)
+    return _ALMACEN.leer_frame(codigo)
 
 
 def manifest(origen: str) -> Dict[str, Any]:
@@ -482,7 +816,7 @@ def manifest(origen: str) -> Dict[str, Any]:
             "meet": {
                 "web": {
                     "sidePanelUrl": origen.rstrip("/") + "/aula/panel",
-                    "supportsScreenSharing": False,
+                    "supportsScreenSharing": True,
                     "addOnOrigins": [origen.rstrip("/")],
                     "logoUrl": logo,
                     "darkModeLogoUrl": logo,

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=2">
+  <link rel="stylesheet" href="/static/aula.css?v=3">
 </head>
 <body
   data-acta="__ACTA__"
@@ -34,7 +34,7 @@
   </header>
 
   <p class="banner" id="banner">
-    <span>Meet sigue con la cámara y el micrófono. Esta aula es la sala compartida: asientos, turno de palabra y orden del día. Pegá el enlace de la reunión y pasá este enlace por el chat, o abrila en el escenario de Meet con el complemento.</span>
+    <span>Hasta 100 personas en la misma sala. Cualquiera puede compartir su pantalla. Meet sigue con la cámara, el micrófono y el audio.</span>
     <button type="button" id="cerrar-banner" aria-label="Cerrar aviso">×</button>
   </p>
 
@@ -43,6 +43,11 @@
       <div class="telon-cabeza">
         <p class="kicker" id="agenda-kicker">Orden del día</p>
         <p class="palabra" id="palabra">Nadie tiene la palabra</p>
+      </div>
+      <div id="pantalla-caja" class="pantalla" hidden>
+        <p id="pantalla-quien"></p>
+        <video id="pantalla-local" autoplay playsinline muted hidden></video>
+        <img id="pantalla-remota" alt="Pantalla compartida" hidden>
       </div>
       <h1 id="agenda-titulo">Cargando el acta…</h1>
       <p class="meta" id="agenda-meta"></p>
@@ -66,12 +71,17 @@
       <input id="nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
     </label>
     <div class="dock-acciones">
+      <button type="button" class="btn btn-oro" id="btn-pantalla">Compartir pantalla</button>
       <button type="button" class="btn btn-oro" id="btn-palabra">Pedir la palabra</button>
       <button type="button" class="btn btn-fantasma" id="btn-conceder">Dar la palabra</button>
       <button type="button" class="btn btn-fantasma" id="btn-ceder">Cedo la palabra</button>
       <button type="button" class="btn btn-texto" id="btn-salir">Levantarme</button>
     </div>
     <p class="cola" id="cola"></p>
+    <details class="roster">
+      <summary id="roster-cuenta">En la sala</summary>
+      <p id="roster-lista"></p>
+    </details>
     <form class="meet" id="form-meet">
       <label>
         Enlace de Google Meet
@@ -83,6 +93,6 @@
   </footer>
 
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=2"></script>
+  <script src="/static/aula.js?v=3"></script>
 </body>
 </html>

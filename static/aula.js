@@ -10,6 +10,12 @@ const state = {
   items: [],
   actas: [],
   timer: 0,
+  fallos: 0,
+  pulso: 0,
+  captura: 0,
+  stream: null,
+  frameV: 0,
+  lleno: false,
 };
 
 if (!state.client) {
@@ -50,11 +56,18 @@ async function cargarSala() {
   const url = "/api/aula/" + encodeURIComponent(state.sala)
     + "?client=" + encodeURIComponent(state.client)
     + (acta ? "&acta=" + encodeURIComponent(acta) : "");
-  const sala = await api(url);
-  const cambioActa = !state.room || state.room.acta !== sala.acta;
-  state.room = sala;
-  pintarSala();
-  if (cambioActa) await cargarTemas();
+  try {
+    const sala = await api(url);
+    const cambioActa = !state.room || state.room.acta !== sala.acta;
+    state.room = sala;
+    state.fallos = 0;
+    pintarSala();
+    if (cambioActa) await cargarTemas();
+  } catch (err) {
+    state.fallos += 1;
+    if (state.room) decir("Reconectando la sala…");
+    else decir(err.message);
+  }
 }
 
 async function cargarTemas() {
@@ -82,10 +95,11 @@ async function enviar(accion, extra) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cuerpoAccion),
     });
-    decir("");
+    if (accion !== "pulso") decir("");
     pintarSala();
     if (accion === "acta") await cargarTemas();
   } catch (err) {
+    if (err.message && err.message.indexOf("llena") !== -1) state.lleno = true;
     decir(err.message);
     await cargarSala();
   }
@@ -99,9 +113,9 @@ function pintarSala() {
   const sala = state.room;
   if (!sala) return;
   const sync = $("sync");
-  sync.textContent = sala.sync === "drive"
-    ? "Sala compartida · " + sala.codigo
-    : "Sala de este servidor · " + sala.codigo;
+  sync.textContent = (sala.sync === "drive" ? "Sala compartida" : sala.sync === "degradado" ? "Reconectando" : "Sala de este servidor")
+    + " · " + (sala.presentes || 0) + "/" + (sala.cupo || 100)
+    + " · " + sala.codigo;
   sync.classList.toggle("is-off", sala.sync !== "drive");
 
   const select = $("acta");
@@ -168,7 +182,54 @@ function pintarSala() {
   const hablo = turno && sentado() && turno.id === sala.sentado;
   $("btn-ceder").disabled = !(hablo || (sala.conduzco && turno));
   $("btn-meet-abrir").disabled = !sala.meet_url;
+  pintarPantalla(sala);
+  pintarRoster(sala);
   pintarAgenda();
+}
+
+function pintarRoster(sala) {
+  const cuenta = $("roster-cuenta");
+  const lista = $("roster-lista");
+  if (!cuenta || !lista) return;
+  const total = sala.presentes || 0;
+  cuenta.textContent = total + " de " + (sala.cupo || 100) + " en la sala";
+  lista.textContent = (sala.roster || []).map((p) => p.nombre).join(" · ");
+}
+
+function pintarPantalla(sala) {
+  const caja = $("pantalla-caja");
+  const local = $("pantalla-local");
+  const remota = $("pantalla-remota");
+  const quien = $("pantalla-quien");
+  const boton = $("btn-pantalla");
+  const activa = sala.pantalla && sala.pantalla.activa;
+  if (state.stream && (!activa || !sala.pantalla.propia)) dejarPantalla(false);
+  if (!activa) {
+    caja.hidden = true;
+    local.hidden = true;
+    remota.hidden = true;
+    boton.textContent = "Compartir pantalla";
+    return;
+  }
+  caja.hidden = false;
+  quien.textContent = sala.pantalla.propia
+    ? "Estás compartiendo tu pantalla"
+    : (sala.pantalla.nombre || "Alguien") + " está compartiendo su pantalla";
+  if (sala.pantalla.propia && state.stream) {
+    local.hidden = false;
+    remota.hidden = true;
+    if (local.srcObject !== state.stream) local.srcObject = state.stream;
+    boton.textContent = "Dejar de compartir";
+    return;
+  }
+  local.hidden = true;
+  remota.hidden = false;
+  const marca = Math.floor(Date.now() / 2000);
+  if (state.frameV !== marca) {
+    state.frameV = marca;
+    remota.src = "/api/aula/" + encodeURIComponent(state.sala) + "/pantalla?v=" + marca;
+  }
+  boton.textContent = "Compartir mi pantalla";
 }
 
 function pintarAgenda() {
@@ -264,10 +325,86 @@ async function engancharMeet() {
 }
 
 function arrancarPoll() {
-  clearInterval(state.timer);
-  state.timer = setInterval(() => {
-    if (!document.hidden) cargarSala().catch((err) => decir(err.message));
-  }, 2000);
+  clearTimeout(state.timer);
+  const paso = () => {
+    const espera = state.fallos > 2 ? 8000 : 3000;
+    state.timer = setTimeout(async () => {
+      if (!document.hidden) await cargarSala();
+      paso();
+    }, espera);
+  };
+  paso();
+}
+
+function latido() {
+  clearInterval(state.pulso);
+  state.pulso = setInterval(() => {
+    const nombre = $("nombre").value.trim();
+    if (!nombre || state.lleno || document.hidden) return;
+    enviar("pulso", { nombre: nombre }).catch(() => {});
+  }, 20000);
+}
+
+async function compartirPantalla() {
+  if (state.stream) {
+    await dejarPantalla(true);
+    return;
+  }
+  const nombre = $("nombre").value.trim();
+  if (!nombre) {
+    decir("Escribí tu nombre para compartir la pantalla.");
+    $("nombre").focus();
+    return;
+  }
+  localStorage.setItem("aula-nombre", nombre);
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false });
+  } catch (_err) {
+    decir("No se compartió la pantalla.");
+    return;
+  }
+  state.stream = stream;
+  stream.getVideoTracks()[0].addEventListener("ended", () => dejarPantalla(true));
+  await enviar("pantalla", { nombre: nombre });
+  await enviarFrame();
+  state.captura = setInterval(enviarFrame, 2000);
+}
+
+async function enviarFrame() {
+  const video = $("pantalla-local");
+  if (!state.stream || !video) return;
+  if (!video.srcObject) video.srcObject = state.stream;
+  if (!video.videoWidth) return;
+  const ancho = Math.min(video.videoWidth, 1280);
+  const alto = Math.max(1, Math.round(video.videoHeight * (ancho / video.videoWidth)));
+  const lienzo = enviarFrame.lienzo || (enviarFrame.lienzo = document.createElement("canvas"));
+  lienzo.width = ancho;
+  lienzo.height = alto;
+  lienzo.getContext("2d").drawImage(video, 0, 0, ancho, alto);
+  const blob = await new Promise((resolver) => lienzo.toBlob(resolver, "image/jpeg", 0.55));
+  if (!blob || blob.size > 180000) return;
+  try {
+    const respuesta = await fetch(
+      "/api/aula/" + encodeURIComponent(state.sala) + "/pantalla?client=" + encodeURIComponent(state.client),
+      { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob }
+    );
+    if (respuesta.status === 403) dejarPantalla(false);
+  } catch (_err) {
+    /* el próximo cuadro reintenta */
+  }
+}
+
+async function dejarPantalla(avisar) {
+  clearInterval(state.captura);
+  state.captura = 0;
+  if (state.stream) {
+    state.stream.getTracks().forEach((pista) => pista.stop());
+    state.stream = null;
+  }
+  const local = $("pantalla-local");
+  if (local) local.srcObject = null;
+  if (avisar) await enviar("cortar");
 }
 
 async function iniciar() {
@@ -281,6 +418,7 @@ async function iniciar() {
     sessionStorage.setItem("aula-banner", "off");
   });
   $("btn-palabra").addEventListener("click", () => enviar("palabra"));
+  $("btn-pantalla").addEventListener("click", () => compartirPantalla());
   $("btn-ceder").addEventListener("click", () => enviar("ceder"));
   $("btn-conceder").addEventListener("click", () => enviar("conceder"));
   $("btn-salir").addEventListener("click", () => enviar("salir"));
@@ -320,7 +458,10 @@ async function iniciar() {
 
   await engancharMeet();
   await cargarSala();
+  const nombre = $("nombre").value.trim();
+  if (nombre) await enviar("pulso", { nombre: nombre });
   arrancarPoll();
+  latido();
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) cargarSala().catch((err) => decir(err.message));
   });

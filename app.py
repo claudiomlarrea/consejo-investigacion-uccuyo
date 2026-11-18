@@ -301,20 +301,55 @@ def api_aula_codigo(texto: str = ""):
 def api_aula_get(codigo: str, acta: Optional[int] = None, client: str = ""):
     try:
         return aula.obtener(codigo, acta, client)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
     except aula.AulaError as exc:
         raise HTTPException(exc.status, exc.mensaje)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(503, "La sala no responde. Reintentá en unos segundos.")
 
 
 @app.post("/api/aula/{codigo}")
 def api_aula_post(codigo: str, body: AulaIn):
     try:
         return aula.aplicar(codigo, body.model_dump())
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
     except aula.AulaError as exc:
         raise HTTPException(exc.status, exc.mensaje)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(503, "La sala no responde. Reintentá en unos segundos.")
+
+
+@app.post("/api/aula/{codigo}/pantalla")
+async def api_aula_pantalla(codigo: str, request: Request, client: str = ""):
+    cuerpo = await request.body()
+    try:
+        aula.guardar_pantalla(codigo, client, cuerpo)
+    except aula.AulaError as exc:
+        raise HTTPException(exc.status, exc.mensaje)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(503, "No pude publicar la pantalla.")
+    return Response(status_code=204)
+
+
+@app.get("/api/aula/{codigo}/pantalla")
+def api_aula_pantalla_ver(codigo: str):
+    try:
+        imagen = aula.leer_pantalla(codigo)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(503, "La pantalla no está disponible.")
+    if not imagen:
+        raise HTTPException(404, "Nadie está compartiendo.")
+    return Response(
+        content=imagen,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=1, s-maxage=1, stale-while-revalidate=3"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
