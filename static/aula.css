@@ -127,6 +127,11 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
   border-color: transparent;
   opacity: 1;
 }
+.btn-mano {
+  background: #1c1400;
+  color: #f6d86a;
+  border: 2px solid #eab308;
+}
 .btn-oro { background: var(--gold); color: #1c1400; }
 .btn.is-vivo { box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.7); }
 .btn-fantasma, .btn-texto {

@@ -147,6 +147,13 @@ function pintar() {
   });
   const turno = sala.turno && sala.turno.nombre;
   if (turno) decir("Tiene la palabra: " + turno);
+  const yoPide = sala.sentado != null && (sala.cola || []).some((persona) => persona.id === sala.sentado);
+  const botonMano = $("p-palabra");
+  if (botonMano) {
+    botonMano.textContent = yoPide ? "Bajar la mano" : "Pedir la palabra";
+    botonMano.classList.toggle("btn-oro", !yoPide);
+    botonMano.classList.toggle("btn-mano", yoPide);
+  }
 }
 
 async function entrar() {

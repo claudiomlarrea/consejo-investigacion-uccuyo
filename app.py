@@ -70,6 +70,14 @@ if not ASSETS.is_dir():
     ASSETS = ROOT.parent / "assets"
 
 app = FastAPI(title="Consejo de Investigación — prototipo local")
+
+
+@app.middleware("http")
+async def _aula_sin_cache(request: Request, call_next):
+    respuesta = await call_next(request)
+    if request.url.path.startswith("/api/aula"):
+        respuesta.headers["Cache-Control"] = "no-store, max-age=0"
+    return respuesta
 if ASSETS.is_dir():
     app.mount("/brand", StaticFiles(directory=str(ASSETS)), name="brand")
 
