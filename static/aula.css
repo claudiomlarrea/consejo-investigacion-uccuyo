@@ -98,6 +98,7 @@ img { display: block; }
 }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-oro { background: var(--gold); color: #1c1400; }
+.btn.is-vivo { box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.7); }
 .btn-fantasma, .btn-texto {
   background: transparent;
   color: var(--ink);

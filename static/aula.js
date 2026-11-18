@@ -91,7 +91,7 @@ async function enviar(accion, extra) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cuerpoAccion),
     });
-    if (accion !== "pulso") decir("");
+    if (accion !== "pulso" && accion !== "senal" && accion !== "voz") decir("");
     pintarSala();
   } catch (err) {
     if (err.message && err.message.indexOf("llena") !== -1) state.lleno = true;
@@ -167,6 +167,7 @@ function pintarSala() {
   pintarPantalla(sala);
   pintarRoster(sala);
   pintarAgenda();
+  conectarVoces();
 }
 
 function pintarAsientos(sala, turno) {
@@ -333,11 +334,11 @@ function pintarAgenda() {
   const lead = $("guia-lead");
   if (lead) {
     if (sala.sync !== "drive" && location.hostname === "consejo-investigacion.vercel.app") {
-      lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión para abrir la sala compartida de este mismo Meet.";
+      lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión: seguís en el aula, en la sala compartida.";
     } else if (!sala.organo) {
-      lead.textContent = "Ya estás en la reunión. Completá los datos y tocá Comenzar reunión. El micrófono se enciende en Meet, abajo a la izquierda.";
+      lead.textContent = "Ya estás en la reunión, en esta aula. Completá los datos y tocá Comenzar reunión. El micrófono se enciende acá.";
     } else {
-      lead.textContent = "La reunión comenzó. El micrófono se enciende en Meet, abajo a la izquierda. Los demás entran con el mismo enlace.";
+      lead.textContent = "La reunión comenzó, en esta aula. El micrófono se enciende acá. Los demás entran con el mismo enlace.";
     }
   }
   $("btn-anterior").disabled = !sala.conduzco || indice <= 0;
@@ -399,20 +400,154 @@ async function guardarReunion(event) {
 }
 
 function encenderMicrofono() {
-  const url = urlMeet() || enlaceDelCampo();
-  if (!url) {
-    decir("Pegá el enlace de Meet y tocá Entrar a la reunión. El micrófono se enciende ahí, abajo a la izquierda.");
+  alternarMicrofono();
+}
+
+const vocesPc = new Map();
+const vocesHechas = new Set();
+let microLocal = null;
+
+function iceListo(pc) {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolver) => {
+    const tope = setTimeout(resolver, 2500);
+    pc.addEventListener("icegatheringstatechange", () => {
+      if (pc.iceGatheringState === "complete") {
+        clearTimeout(tope);
+        resolver();
+      }
+    });
+  });
+}
+
+function crearPc(otro) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
+  vocesPc.set(otro, pc);
+  pc.addEventListener("track", (evento) => {
+    let audio = document.getElementById("voz-" + otro);
+    if (!audio) {
+      audio = document.createElement("audio");
+      audio.autoplay = true;
+      audio.id = "voz-" + otro;
+      audio.setAttribute("playsinline", "");
+      document.body.appendChild(audio);
+    }
+    audio.srcObject = evento.streams[0] || new MediaStream([evento.track]);
+    audio.play().catch(() => {});
+  });
+  return pc;
+}
+
+function agregarPistas(pc) {
+  if (!microLocal) return;
+  microLocal.getTracks().forEach((pista) => {
+    if (!pc.getSenders().some((envio) => envio.track === pista)) pc.addTrack(pista, microLocal);
+  });
+}
+
+async function ofrecer(otro) {
+  if (vocesPc.has(otro) || vocesHechas.has("offer:" + otro)) return;
+  vocesHechas.add("offer:" + otro);
+  try {
+    const pc = crearPc(otro);
+    agregarPistas(pc);
+    await pc.setLocalDescription(await pc.createOffer());
+    await iceListo(pc);
+    await enviar("senal", { senal: { para: otro, tipo: "offer", cuerpo: pc.localDescription.sdp } });
+  } catch (_err) {
+    vocesHechas.delete("offer:" + otro);
+    const pc = vocesPc.get(otro);
+    if (pc) pc.close();
+    vocesPc.delete(otro);
+  }
+}
+
+async function recibirSenal(senal) {
+  if (!state.room || !state.room.adentro || senal.para !== state.client) return;
+  if (senal.tipo === "offer") {
+    const otroHabla = (state.room.voces || []).some((voz) => voz.client === senal.de);
+    if (microLocal && otroHabla && state.client < senal.de) return;
+    let pc = vocesPc.get(senal.de);
+    if (pc && pc.signalingState === "stable") return;
+    if (!pc) pc = crearPc(senal.de);
+    agregarPistas(pc);
+    await pc.setRemoteDescription({ type: "offer", sdp: senal.cuerpo });
+    await pc.setLocalDescription(await pc.createAnswer());
+    await iceListo(pc);
+    await enviar("senal", { senal: { para: senal.de, tipo: "answer", cuerpo: pc.localDescription.sdp } });
+    return;
+  }
+  if (senal.tipo !== "answer") return;
+  const pc = vocesPc.get(senal.de);
+  if (!pc || pc.signalingState !== "have-local-offer") return;
+  await pc.setRemoteDescription({ type: "answer", sdp: senal.cuerpo });
+}
+
+function conectarVoces() {
+  const boton = $("btn-micro");
+  if (boton) {
+    boton.textContent = microLocal ? "Apagar micrófono" : "Encender micrófono";
+    boton.classList.toggle("is-vivo", Boolean(microLocal));
+  }
+  const sala = state.room;
+  if (!sala || !sala.adentro) return;
+  const idsVoces = new Set((sala.voces || []).map((voz) => voz.client));
+  const otros = (sala.roster || []).map((persona) => persona.client).filter((id) => id && id !== state.client).slice(0, 30);
+  Array.from(vocesPc.keys()).forEach((id) => {
+    const sigue = idsVoces.has(id) || (microLocal && otros.indexOf(id) !== -1);
+    if (sigue) return;
+    vocesPc.get(id).close();
+    vocesPc.delete(id);
+    vocesHechas.delete("offer:" + id);
+    const audio = document.getElementById("voz-" + id);
+    if (audio) audio.remove();
+  });
+  if (microLocal) {
+    otros.forEach((id) => {
+      const otroHabla = idsVoces.has(id);
+      if (!otroHabla || state.client < id) ofrecer(id);
+    });
+  }
+  (sala.senales || []).forEach((senal) => {
+    if (vocesHechas.has("senal:" + senal.id)) return;
+    vocesHechas.add("senal:" + senal.id);
+    recibirSenal(senal).catch(() => {});
+  });
+}
+
+async function alternarMicrofono() {
+  if (microLocal) {
+    microLocal.getTracks().forEach((pista) => pista.stop());
+    microLocal = null;
+    vocesPc.forEach((pc) => pc.close());
+    vocesPc.clear();
+    document.querySelectorAll("audio[id^='voz-']").forEach((nodo) => nodo.remove());
+    if (state.room && state.room.adentro) await enviar("voz", { micro: false });
+    conectarVoces();
+    decir("Micrófono apagado. Seguís en el aula.");
+    return;
+  }
+  if (!state.sala) {
+    decir("Pegá el enlace y tocá Entrar a la reunión. El micrófono se enciende en esta aula.");
     $("meet").focus();
     return;
   }
-  window.open(url, "_blank", "noopener");
-  decir("Se abrió Meet. El micrófono se enciende abajo a la izquierda de esa ventana.");
-}
-
-function enlaceDelCampo() {
-  const crudo = ($("meet").value || "").trim();
-  const hallado = crudo.match(/[a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4}/i);
-  return hallado ? "https://meet.google.com/" + hallado[0].toLowerCase() : "";
+  if (!state.room || !state.room.adentro) {
+    if (!exigirIdentidad()) return;
+    await enviar("perfil");
+  }
+  if (!state.room || !state.room.adentro) return;
+  try {
+    microLocal = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (_err) {
+    decir("El navegador no dejó prender el micrófono. Permitilo en esta página, sin salir del aula.");
+    return;
+  }
+  await enviar("voz", { micro: true });
+  conectarVoces();
+  decir("Micrófono encendido. Seguís en el aula.");
 }
 
 async function cargarArchivo() {
@@ -464,14 +599,6 @@ function origenCompartido() {
   return location.origin;
 }
 
-function urlMeet() {
-  if (state.room && state.room.meet_url) return state.room.meet_url;
-  if (/^[a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4}$/.test(state.sala)) {
-    return "https://meet.google.com/" + state.sala;
-  }
-  return "";
-}
-
 async function guardarMeet(event) {
   event.preventDefault();
   const crudo = $("meet").value.trim();
@@ -480,23 +607,17 @@ async function guardarMeet(event) {
     $("meet").focus();
     return;
   }
-  const ventana = window.open("about:blank", "_blank");
   let data;
   try {
     data = await api("/api/aula/codigo?texto=" + encodeURIComponent(crudo));
   } catch (err) {
-    if (ventana) ventana.close();
     decir(err.message);
     return;
   }
   const destino = origenCompartido() + "/aula?sala=" + encodeURIComponent(data.codigo);
   const misma = data.codigo === state.sala && origenCompartido() === location.origin;
-  const llamada = data.meet_url || ("https://meet.google.com/" + data.codigo);
-  if (ventana) ventana.location = llamada;
   if (misma) {
-    decir(ventana
-      ? "Ya estás en la reunión. El micrófono se enciende en Meet, abajo a la izquierda."
-      : "Ya estás en la reunión. Si no se abrió Meet, tocá Encender micrófono.");
+    decir("Ya estás en la reunión, en esta aula. El micrófono se enciende acá.");
     return;
   }
   location.href = destino;
@@ -617,9 +738,9 @@ async function entrar() {
   if (videoOk) {
     await enviar("camara", { camara: true });
     arrancarEnvioCara();
-    decir("Ya estás en la sala y se ve tu cara. Para escucharse, abrí Meet o pegá el enlace si ya lo tenés.");
+    decir("Ya estás en la sala y se ve tu cara. El micrófono se enciende acá, con el botón de arriba.");
   } else if (state.room && state.room.adentro) {
-    decir("Entraste. La cámara no se prendió: probá «Prender mi cámara». El audio se escucha en Meet.");
+    decir("Entraste. La cámara no se prendió: probá «Prender mi cámara». El micrófono se enciende acá.");
   }
 }
 
@@ -725,7 +846,7 @@ async function iniciar() {
   await cargarSala();
   if (state.nombre && state.funcion) await enviar("perfil");
   if (state.room && !state.room.organo) {
-    decir("Ya estás en la reunión. El micrófono se enciende en Meet, abajo a la izquierda. Falta tocar Comenzar reunión.");
+    decir("Ya estás en la reunión, en esta aula. El micrófono se enciende acá. Falta tocar Comenzar reunión.");
   }
   arrancarPoll();
   latido();

@@ -118,6 +118,8 @@ class AulaIn(BaseModel):
     camara: bool = False
     tema: Optional[int] = None
     titulos: List[str] = Field(default_factory=list)
+    micro: bool = False
+    senal: Optional[Dict[str, str]] = None
     rev: Optional[int] = None
 
 

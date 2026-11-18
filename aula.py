@@ -211,6 +211,9 @@ def _asegurar_forma(sala: Dict[str, Any]) -> None:
     sala.setdefault("unidad", "")
     sala.setdefault("temas", [])
     sala.setdefault("meet", "")
+    sala.setdefault("voces", {})
+    sala.setdefault("senales", [])
+    sala.setdefault("senal_seq", 0)
     if isinstance(sala.get("acta"), int):
         sala["acta"] = str(sala["acta"])
     sala.setdefault("acta", "")
@@ -254,6 +257,9 @@ def _purgar(sala: Dict[str, Any]) -> None:
     pantalla = sala.get("pantalla") or None
     if pantalla and str(pantalla.get("client") or "") not in vivos:
         sala["pantalla"] = None
+    voces = sala.get("voces") or {}
+    if isinstance(voces, dict):
+        sala["voces"] = {cid: info for cid, info in voces.items() if cid in vivos}
 
 
 def _rotulo(ocupante: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -323,6 +329,7 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
                 "nombre": persona.get("nombre") or "Sin nombre",
                 "funcion": persona.get("funcion") or "",
                 "cara": bool(persona.get("camara")),
+                "client": cid,
                 "quien": cid if persona.get("camara") else "",
                 "propio": cid == client,
             }
@@ -368,6 +375,22 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
             "nombre": pantalla.get("nombre") or "",
             "propia": str(pantalla.get("client") or "") == client,
         },
+        "voces": [
+            {"client": cid, "nombre": (vivos.get(cid) or {}).get("nombre") or ""}
+            for cid in (sala.get("voces") or {})
+            if cid in vivos
+        ],
+        "senales": [
+            {
+                "id": int(item.get("id") or 0),
+                "de": str(item.get("de") or ""),
+                "para": str(item.get("para") or ""),
+                "tipo": str(item.get("tipo") or ""),
+                "cuerpo": str(item.get("cuerpo") or ""),
+            }
+            for item in (sala.get("senales") or [])
+            if isinstance(item, dict) and str(item.get("para") or "") == client
+        ],
     }
 
 
@@ -383,7 +406,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
     client = _cliente(body)
     accion = str(body.get("accion") or "")
     _asegurar_forma(sala)
-    if accion not in ("pulso", "entrar", "perfil", "pantalla", "cortar", "camara"):
+    if accion not in ("pulso", "entrar", "perfil", "pantalla", "cortar", "camara", "voz", "senal"):
         if body.get("rev") is not None and int(body["rev"]) != sala["rev"]:
             raise AulaError(409, "Otra persona acaba de actualizar la sala. Reintentá.")
 
@@ -588,6 +611,41 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         if not sala["temas"] or tema < 0 or tema >= len(sala["temas"]):
             raise AulaError(400, "Ese tema no está en el orden del día.")
         sala["tema"] = tema
+        return True
+
+    if accion == "voz":
+        _exigir_adentro(sala, client)
+        sala.setdefault("voces", {})
+        if body.get("micro"):
+            persona = sala["presentes"].get(client) or {}
+            sala["voces"][client] = {"nombre": persona.get("nombre") or "", "visto": _ahora_s()}
+        else:
+            sala["voces"].pop(client, None)
+        return True
+
+    if accion == "senal":
+        _exigir_adentro(sala, client)
+        senal = body.get("senal") or {}
+        if not isinstance(senal, dict):
+            raise AulaError(400, "La señal de audio no es válida.")
+        tipo = str(senal.get("tipo") or "")
+        para = str(senal.get("para") or "")
+        cuerpo = str(senal.get("cuerpo") or "")
+        if tipo not in ("offer", "answer") or len(para) < 8 or len(para) > 80:
+            raise AulaError(400, "La señal de audio no es válida.")
+        if "v=0" not in cuerpo[:80] or len(cuerpo) > 12000:
+            raise AulaError(400, "La señal de audio no es válida.")
+        sala["senal_seq"] = int(sala.get("senal_seq") or 0) + 1
+        lista = sala.setdefault("senales", [])
+        lista.append({
+            "id": sala["senal_seq"],
+            "de": client,
+            "para": para,
+            "tipo": tipo,
+            "cuerpo": cuerpo,
+        })
+        if len(lista) > 30:
+            del lista[:-30]
         return True
 
     raise AulaError(400, "Acción desconocida.")
