@@ -2,11 +2,18 @@ const cuerpo = document.body;
 const params = new URLSearchParams(location.search);
 const estadoEl = document.getElementById("estado");
 
+localStorage.removeItem("aula-nombre");
+localStorage.removeItem("aula-funcion");
+try {
+  sessionStorage.removeItem("aula-nombre");
+  sessionStorage.removeItem("aula-funcion");
+} catch (_err) {
+  /* este navegador no guarda la sesión */
+}
+
 const state = {
   sala: params.get("sala") || cuerpo.dataset.sala || "",
   client: localStorage.getItem("aula-client") || "",
-  nombre: localStorage.getItem("aula-nombre") || "",
-  funcion: localStorage.getItem("aula-funcion") || "",
   room: null,
   timer: 0,
   fallos: 0,
@@ -20,6 +27,8 @@ const state = {
   meFui: false,
   cargandoTemas: false,
   enMeet: false,
+  reunionPendiente: false,
+  cierrePendiente: false,
 };
 
 if (!state.client) {
@@ -73,10 +82,7 @@ function identidad() {
 }
 
 function guardarIdentidad() {
-  const datos = identidad();
-  localStorage.setItem("aula-nombre", datos.nombre);
-  localStorage.setItem("aula-funcion", datos.funcion);
-  return datos;
+  return identidad();
 }
 
 async function api(url, opciones) {
@@ -95,9 +101,10 @@ async function api(url, opciones) {
   return data;
 }
 
-async function cargarSala() {
+async function cargarSala(ingreso) {
   const url = "/api/aula/" + encodeURIComponent(state.sala)
-    + "?client=" + encodeURIComponent(state.client);
+    + "?client=" + encodeURIComponent(state.client)
+    + (ingreso ? "&ingreso=1" : "");
   try {
     state.room = await api(url);
     state.fallos = 0;
@@ -188,8 +195,6 @@ function pintarSala() {
   sincronizar($("unidad"), antes.unidad, sala.unidad || "");
   sincronizar($("acta"), antes.acta, sala.acta || "");
   state.anterior = { organo: sala.organo || "", unidad: sala.unidad || "", acta: sala.acta || "" };
-  const meet = $("meet");
-  if (document.activeElement !== meet && sala.meet_url && !meet.value) meet.value = sala.meet_url;
 
   const turno = sala.turno;
   const palabra = $("palabra");
@@ -213,7 +218,12 @@ function pintarSala() {
   $("btn-conceder").disabled = !sala.conduzco || !sala.cola.length;
   const hablo = turno && sentado() && turno.id === sala.sentado;
   $("btn-ceder").disabled = !(hablo || (sala.conduzco && turno));
-  $("btn-entrar").textContent = sala.adentro ? "Actualizar mi función" : "Entrar y prender mi cámara";
+  const entrarBtn = $("btn-entrar");
+  if (entrarBtn) {
+    entrarBtn.textContent = sala.adentro ? "Guardar función" : "Entrar a la reunión";
+    entrarBtn.classList.toggle("btn-oro", !sala.adentro);
+    entrarBtn.classList.toggle("btn-fantasma", Boolean(sala.adentro));
+  }
   pintarPantalla(sala);
   pintarRoster(sala);
   pintarAgenda();
@@ -361,6 +371,42 @@ function pintarPantalla(sala) {
   pintarControles();
 }
 
+function pintarReunion(sala) {
+  const empezar = $("btn-reunion");
+  const cerrar = $("btn-cerrar");
+  if (!sala) return;
+  const activa = Boolean(sala.organo) && !sala.cerrada;
+  const cerrada = Boolean(sala.cerrada);
+  if (empezar) {
+    empezar.classList.toggle("is-pendiente", Boolean(state.reunionPendiente));
+    empezar.classList.toggle("is-activa", activa && !state.reunionPendiente);
+    if (state.reunionPendiente) {
+      empezar.textContent = "Comenzar reunión";
+      empezar.disabled = true;
+    } else if (activa) {
+      empezar.textContent = "Reunión en curso";
+      empezar.disabled = true;
+    } else {
+      empezar.textContent = "Comenzar reunión";
+      empezar.disabled = false;
+    }
+  }
+  if (cerrar) {
+    cerrar.classList.toggle("is-pendiente", Boolean(state.cierrePendiente));
+    cerrar.classList.toggle("is-cerrada", cerrada && !state.cierrePendiente);
+    if (state.cierrePendiente) {
+      cerrar.textContent = "Cerrar reunión";
+      cerrar.disabled = true;
+    } else if (cerrada) {
+      cerrar.textContent = "Reunión cerrada";
+      cerrar.disabled = true;
+    } else {
+      cerrar.textContent = "Cerrar reunión";
+      cerrar.disabled = !sala.organo;
+    }
+  }
+}
+
 function pintarAgenda() {
   const sala = state.room;
   if (!sala) return;
@@ -387,22 +433,21 @@ function pintarAgenda() {
     aviso.textContent = "";
     aviso.classList.remove("is-error");
   }
-  const botonReunion = $("btn-reunion");
-  if (botonReunion) botonReunion.textContent = sala.organo ? "Actualizar reunión" : "Comenzar reunión";
-  const botonCerrar = $("btn-cerrar");
-  if (botonCerrar) botonCerrar.textContent = sala.cerrada ? "Reabrir reunión" : "Cerrar reunión";
   const lead = $("guia-lead");
   if (lead) {
     if (state.enMeet) {
       lead.textContent = "Estás en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet. La mesa, la palabra y el orden del día siguen acá.";
     } else if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
       lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión: seguís en el aula, en la sala compartida.";
-    } else if (!sala.organo) {
-      lead.textContent = "Ya estás en la reunión, en esta aula. Completá los datos y tocá Comenzar reunión. El micrófono se enciende acá.";
+    } else if (!sala.adentro) {
+      lead.textContent = "Escribí tu nombre y tu función, y tocá Entrar a la reunión. La cámara y el micrófono se prenden abajo, si los querés.";
+    } else if (!sala.organo || sala.cerrada) {
+      lead.textContent = "Ya entraste al aula. Elegí el órgano y la unidad, y tocá Comenzar reunión. El número de acta es opcional.";
     } else {
-      lead.textContent = "La reunión comenzó, en esta aula. El micrófono se enciende acá. Los demás entran con el mismo enlace.";
+      lead.textContent = "La reunión está en curso. El micrófono y la cámara se prenden abajo, si los querés.";
     }
   }
+  pintarReunion(sala);
   const puedeEditar = Boolean(sala.conduzco || !sala.organo);
   $("btn-anterior").disabled = !puedeEditar || indice <= 0;
   $("btn-siguiente").disabled = !puedeEditar || !items.length || indice >= items.length - 1;
@@ -449,17 +494,25 @@ function clickAsiento(asiento) {
 
 async function guardarReunion(event) {
   event.preventDefault();
+  if (state.reunionPendiente) return;
+  if (state.room && state.room.organo && !state.room.cerrada) return;
   if (!state.room || !state.room.adentro) {
-    decir("Primero entrá con tu nombre y tu función. Después guardá el órgano, la unidad y el acta.");
+    decir("Primero entrá con tu nombre y tu función. Después elegí el órgano y la unidad.");
     $("nombre").focus();
     return;
   }
-  await enviar("reunion", {
+  state.reunionPendiente = true;
+  pintarReunion(state.room);
+  const ok = await enviar("reunion", {
     organo: $("organo").value,
     unidad: $("unidad").value.trim(),
     acta: $("acta").value.trim(),
   });
-  if (state.room && state.room.organo) decir("La reunión comenzó. Los demás entran pegando el mismo enlace de Meet.");
+  state.reunionPendiente = false;
+  pintarReunion(state.room);
+  if (ok && state.room && state.room.organo && !state.room.cerrada) {
+    decir("La reunión comenzó. El micrófono y la cámara se prenden abajo, si los querés.");
+  }
 }
 
 function encenderMicrofono() {
@@ -798,16 +851,25 @@ async function cargarArchivo(reintento) {
 }
 
 async function cerrarReunion() {
+  if (state.cierrePendiente || (state.room && state.room.cerrada)) return;
   if (!state.room || !state.room.adentro) {
     decir("Entrá con tu nombre y tu función para cerrar la reunión.");
     $("nombre").focus();
     return;
   }
-  const cerrar = !state.room.cerrada;
-  await enviar(cerrar ? "cerrar" : "reabrir");
-  const texto = state.room && state.room.cerrada ? "Reunión cerrada." : "La reunión sigue abierta.";
-  avisoAgenda(texto, false);
-  decir(texto);
+  if (!state.room.organo) {
+    decir("La reunión todavía no comenzó.");
+    return;
+  }
+  state.cierrePendiente = true;
+  pintarReunion(state.room);
+  const ok = await enviar("cerrar");
+  state.cierrePendiente = false;
+  pintarReunion(state.room);
+  if (ok && state.room && state.room.cerrada) {
+    avisoAgenda("Reunión cerrada.", false);
+    decir("Reunión cerrada. Podés comenzar otra cuando quieras.");
+  }
 }
 
 async function agregarTema(event) {
@@ -888,32 +950,53 @@ function origenCompartido() {
   return location.origin;
 }
 
-async function guardarMeet(event) {
-  event.preventDefault();
+async function abrirMeet(event) {
+  if (event) event.preventDefault();
   if (state.enMeet) {
     decir("Ya estás en Meet. El aula sigue en esta reunión.");
     return;
   }
-  const crudo = $("meet").value.trim();
-  if (!crudo) {
-    decir("Pegá el enlace de Meet del calendario.");
-    $("meet").focus();
+  const crudo = $("meet") ? $("meet").value.trim() : "";
+  let url = "";
+  if (crudo) {
+    try {
+      const data = await api("/api/aula/codigo?texto=" + encodeURIComponent(crudo));
+      url = data.meet_url || "";
+    } catch (err) {
+      decir(err.message);
+      return;
+    }
+  } else if (state.room && state.room.meet_url) {
+    url = state.room.meet_url;
+  }
+  if (!url) {
+    decir("Pegá un enlace de Meet para abrirlo en otra pestaña. El aula sigue acá.");
+    if ($("meet")) $("meet").focus();
     return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
+async function salaDelEnlace() {
+  const crudo = $("meet") ? $("meet").value.trim() : "";
+  if (!crudo) {
+    if (!state.sala) {
+      decir("Pegá el enlace de Meet. Te quedás en el aula.");
+      if ($("meet")) $("meet").focus();
+      return "error";
+    }
+    return "misma";
   }
   let data;
   try {
     data = await api("/api/aula/codigo?texto=" + encodeURIComponent(crudo));
   } catch (err) {
     decir(err.message);
-    return;
+    return "error";
   }
-  const destino = origenCompartido() + "/aula?sala=" + encodeURIComponent(data.codigo);
-  const misma = data.codigo === state.sala && origenCompartido() === location.origin;
-  if (misma) {
-    decir("Ya estás en la reunión, en esta aula. El micrófono se enciende acá.");
-    return;
-  }
-  location.href = destino;
+  if (state.sala && data.codigo === state.sala) return "misma";
+  location.href = origenCompartido() + "/aula?sala=" + encodeURIComponent(data.codigo);
+  return "navega";
 }
 
 async function estadoInicial(cliente) {
@@ -1052,25 +1135,19 @@ async function enviarCara() {
   }
 }
 
-async function entrar() {
+async function entrar(event) {
+  if (event && event.preventDefault) event.preventDefault();
   state.meFui = false;
   if (!exigirIdentidad()) return;
-  if (state.enMeet) {
-    await enviar("perfil");
-    if (state.room && state.room.adentro) {
-      decir("Entraste al aula. El audio, la cámara y la pantalla los maneja Meet.");
-    }
-    return;
+  if (!state.enMeet) {
+    const cambio = await salaDelEnlace();
+    if (cambio !== "misma") return;
   }
-  const camara = prenderCamara();
   await enviar("perfil");
-  const videoOk = await camara;
-  if (videoOk) {
-    await enviar("camara", { camara: true });
-    arrancarEnvioCara();
-    decir("Ya estás en la sala y se ve tu cara. El micrófono se enciende con el botón de abajo.");
-  } else if (state.room && state.room.adentro) {
-    decir("Entraste. La cámara no se prendió: probá «Prender mi cámara». El micrófono se enciende acá.");
+  if (state.room && state.room.adentro) {
+    decir(state.enMeet
+      ? "Entraste al aula. El audio, la cámara y la pantalla los maneja Meet."
+      : "Entraste al aula. La cámara y el micrófono se prenden abajo, si los querés.");
   }
 }
 
@@ -1148,11 +1225,11 @@ async function dejarPantalla(avisar) {
 }
 
 async function iniciar() {
-  $("nombre").value = state.nombre;
-  $("funcion").value = state.funcion;
+  $("nombre").value = "";
+  $("funcion").value = "";
   $("nombre").addEventListener("change", guardarIdentidad);
   $("funcion").addEventListener("change", guardarIdentidad);
-  $("btn-entrar").addEventListener("click", () => entrar());
+  $("form-entrar").addEventListener("submit", entrar);
   $("btn-camara").addEventListener("click", () => alternarCamara());
   $("btn-pantalla").addEventListener("click", () => compartirPantalla());
   $("btn-palabra").addEventListener("click", () => enviar("palabra"));
@@ -1167,7 +1244,8 @@ async function iniciar() {
   });
   $("form-reunion").addEventListener("submit", guardarReunion);
   $("form-tema").addEventListener("submit", agregarTema);
-  $("form-meet").addEventListener("submit", guardarMeet);
+  $("form-meet").addEventListener("submit", (event) => event.preventDefault());
+  $("abrir-meet").addEventListener("click", abrirMeet);
   $("btn-micro").addEventListener("click", encenderMicrofono);
   $("btn-dejar").addEventListener("click", () => salirDelAula());
   $("btn-copiar").addEventListener("click", () => copiarEnlace());
@@ -1178,18 +1256,15 @@ async function iniciar() {
   $("btn-cerrar").addEventListener("click", cerrarReunion);
 
   if (!state.sala) {
-    decir("Pegá el enlace de Meet del calendario y tocá Entrar a la reunión.");
+    decir("Pegá el enlace de Meet y tocá Entrar a la reunión. Te quedás en el aula.");
     return;
   }
 
   const recarga = await engancharMeet();
   if (recarga) return;
-  await cargarSala();
-  if (state.nombre && state.funcion) await enviar("perfil");
+  await cargarSala(true);
   if (state.enMeet) {
     decir("El aula está en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet.");
-  } else if (state.room && !state.room.organo) {
-    decir("Ya estás en la reunión, en esta aula. El micrófono se enciende acá. Falta tocar Comenzar reunión.");
   }
   arrancarPoll();
   latido();

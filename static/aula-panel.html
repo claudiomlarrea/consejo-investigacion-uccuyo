@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=14">
+  <link rel="stylesheet" href="/static/aula.css?v=15">
 </head>
 <body class="panel" data-meet-project="__MEET_PROJECT__">
   <header class="panel-marca">
@@ -26,13 +26,13 @@
   <section class="controles" id="controles" hidden>
     <label class="nombre">
       Tu nombre
-      <input id="p-nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
+      <input id="p-nombre" maxlength="40" autocomplete="off" placeholder="Nombre y apellido">
     </label>
     <label class="nombre">
       Tu función
-      <input id="p-funcion" maxlength="60" placeholder="Secretario de Investigación">
+      <input id="p-funcion" maxlength="60" autocomplete="off" placeholder="Secretario de Investigación">
     </label>
-    <button type="button" class="btn btn-oro btn-bloque" id="p-entrar">Entrar al aula</button>
+    <button type="button" class="btn btn-oro btn-bloque" id="p-entrar">Entrar a la reunión</button>
 
     <form id="p-reunion">
       <label class="nombre">
@@ -56,10 +56,10 @@
         <input id="p-unidad" maxlength="80" placeholder="Facultad, escuela, departamento">
       </label>
       <label class="nombre">
-        N.º de acta
-        <input id="p-acta" maxlength="24" placeholder="El de esta unidad">
+        N.º de acta (opcional)
+        <input id="p-acta" maxlength="24" placeholder="Si esta unidad lo usa" autocomplete="off">
       </label>
-      <button type="submit" class="btn btn-oro btn-bloque" id="p-comenzar">Comenzar reunión</button>
+      <button type="submit" class="btn btn-fantasma btn-bloque btn-reunion" id="p-comenzar">Comenzar reunión</button>
     </form>
 
     <p class="panel-tema" id="p-tema">Agregá los temas del orden del día.</p>
@@ -85,12 +85,12 @@
     <summary>Cómo entrar</summary>
     <ol id="pasos-lista">
       <li>Abrí el aula y escribí tu nombre y tu función.</li>
-      <li>Elegí el órgano, la unidad y el número de acta de esa reunión.</li>
+      <li>Elegí el órgano y la unidad. El número de acta es opcional.</li>
       <li>El micrófono se enciende en el aula, sin salir de esa página.</li>
       <li>Copiá el enlace del aula y pegalo en el chat de Meet.</li>
     </ol>
   </details>
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula-panel.js?v=6"></script>
+  <script src="/static/aula-panel.js?v=7"></script>
 </body>
 </html>

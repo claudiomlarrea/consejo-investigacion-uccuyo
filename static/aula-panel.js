@@ -7,6 +7,7 @@ const state = {
   client: localStorage.getItem("aula-client") || "",
   room: null,
   enMeet: false,
+  reunionPendiente: false,
   sidePanel: null,
   timer: 0,
   cargando: false,
@@ -53,10 +54,11 @@ function identidad() {
   };
 }
 
-async function cargarSala() {
+async function cargarSala(ingreso) {
   if (!state.sala) return;
   const url = "/api/aula/" + encodeURIComponent(state.sala)
-    + "?client=" + encodeURIComponent(state.client);
+    + "?client=" + encodeURIComponent(state.client)
+    + (ingreso ? "&ingreso=1" : "");
   try {
     state.room = await api(url);
     pintar();
@@ -111,8 +113,26 @@ function pintar() {
   $("p-tema").textContent = items.length
     ? items[indice]
     : "Agregá los temas del orden del día.";
-  $("p-comenzar").textContent = sala.organo ? "Actualizar reunión" : "Comenzar reunión";
-  $("p-entrar").textContent = sala.adentro ? "Actualizar mi función" : "Entrar al aula";
+  const empezar = $("p-comenzar");
+  const activa = Boolean(sala.organo) && !sala.cerrada;
+  if (empezar) {
+    empezar.classList.toggle("is-pendiente", Boolean(state.reunionPendiente));
+    empezar.classList.toggle("is-activa", activa && !state.reunionPendiente);
+    if (state.reunionPendiente) {
+      empezar.textContent = "Comenzar reunión";
+      empezar.disabled = true;
+    } else if (activa) {
+      empezar.textContent = "Reunión en curso";
+      empezar.disabled = true;
+    } else {
+      empezar.textContent = "Comenzar reunión";
+      empezar.disabled = false;
+    }
+  }
+  const entrarBtn = $("p-entrar");
+  entrarBtn.textContent = sala.adentro ? "Guardar función" : "Entrar a la reunión";
+  entrarBtn.classList.toggle("btn-oro", !sala.adentro);
+  entrarBtn.classList.toggle("btn-fantasma", Boolean(sala.adentro));
   const lista = $("p-lista");
   lista.replaceChildren();
   items.forEach((titulo, i) => {
@@ -131,8 +151,6 @@ function pintar() {
 
 async function entrar() {
   const datos = identidad();
-  localStorage.setItem("aula-nombre", datos.nombre);
-  localStorage.setItem("aula-funcion", datos.funcion);
   if (!datos.nombre) {
     decir("Escribí tu nombre.");
     $("p-nombre").focus();
@@ -149,17 +167,25 @@ async function entrar() {
 
 async function reunion(event) {
   event.preventDefault();
+  if (state.reunionPendiente) return;
+  if (state.room && state.room.organo && !state.room.cerrada) return;
   if (!state.room || !state.room.adentro) {
     decir("Primero entrá con tu nombre y tu función.");
     $("p-nombre").focus();
     return;
   }
+  state.reunionPendiente = true;
+  pintar();
   const ok = await enviar("reunion", {
     organo: $("p-organo").value,
     unidad: $("p-unidad").value.trim(),
     acta: $("p-acta").value.trim(),
   });
-  if (ok && state.room && state.room.organo) decir("La reunión comenzó. El aula sigue en el escenario.");
+  state.reunionPendiente = false;
+  pintar();
+  if (ok && state.room && state.room.organo && !state.room.cerrada) {
+    decir("La reunión comenzó. El aula sigue en el escenario.");
+  }
 }
 
 async function agregar(event) {
@@ -209,8 +235,8 @@ async function cargarArchivo() {
 function mostrarControles() {
   $("controles").hidden = false;
   $("abrir").hidden = true;
-  $("p-nombre").value = localStorage.getItem("aula-nombre") || "";
-  $("p-funcion").value = localStorage.getItem("aula-funcion") || "";
+  $("p-nombre").value = "";
+  $("p-funcion").value = "";
   clearInterval(state.timer);
   state.timer = setInterval(() => {
     if (!document.hidden) cargarSala();
@@ -266,8 +292,7 @@ async function prepararMeet() {
   }
   state.sala = codigo;
   mostrarControles();
-  await cargarSala();
-  if ($("p-nombre").value && $("p-funcion").value) await enviar("perfil");
+  await cargarSala(true);
   $("escenario").hidden = false;
   let yaEsta = false;
   try {
@@ -316,8 +341,8 @@ async function iniciar() {
   $("p-palabra").addEventListener("click", () => enviar("palabra"));
   $("p-conceder").addEventListener("click", () => enviar("conceder"));
   $("p-ceder").addEventListener("click", () => enviar("ceder"));
-  $("p-nombre").addEventListener("change", () => localStorage.setItem("aula-nombre", $("p-nombre").value.trim()));
-  $("p-funcion").addEventListener("change", () => localStorage.setItem("aula-funcion", $("p-funcion").value.trim()));
+  localStorage.removeItem("aula-nombre");
+  localStorage.removeItem("aula-funcion");
 
   try {
     const adentro = await prepararMeet();
