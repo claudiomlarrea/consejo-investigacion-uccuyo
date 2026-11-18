@@ -193,8 +193,10 @@ def _limpiar_funcion(funcion: str) -> str:
 def _limpiar_acta(valor: str) -> str:
     limpio = " ".join(str(valor or "").split())
     limpio = re.sub(r"(?i)^acta\s*", "", limpio).strip()
-    if not limpio or len(limpio) > 24:
-        raise AulaError(400, "Escribí el número de acta de tu unidad.")
+    if not limpio:
+        return ""
+    if len(limpio) > 24:
+        raise AulaError(400, "El número de acta es muy largo.")
     return limpio
 
 
@@ -644,6 +646,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         sala["organo"] = organo
         sala["unidad"] = _limpiar_unidad(str(body.get("unidad") or ""))
         sala["acta"] = _limpiar_acta(str(body.get("acta") or ""))
+        sala["cerrada"] = False
         return True
 
     if accion == "meet":
@@ -1256,6 +1259,44 @@ def _sesion_drive():
         return None
 
 
+def _hay_otros(sala: Dict[str, Any], client: str) -> bool:
+    return any(cid != client for cid in _vivos(sala))
+
+
+def _conviene_limpiar(sala: Dict[str, Any], client: str) -> bool:
+    """Borrador sin comenzar, o reunión cerrada, si no hay otras personas.
+
+    Una reunión en curso se conserva aunque quien recarga esté solo.
+    """
+    if _hay_otros(sala, client):
+        return False
+    if sala.get("organo") and not sala.get("cerrada"):
+        return False
+    return bool(
+        sala.get("temas")
+        or sala.get("organo")
+        or sala.get("unidad")
+        or sala.get("acta")
+        or sala.get("cerrada")
+        or sala.get("turno") is not None
+        or sala.get("cola")
+    )
+
+
+def _limpiar_sesion_previa(sala: Dict[str, Any]) -> None:
+    sala["organo"] = ""
+    sala["unidad"] = ""
+    sala["acta"] = ""
+    sala["temas"] = []
+    sala["tema"] = 0
+    sala["cerrada"] = False
+    sala["turno"] = None
+    sala["cola"] = []
+    sala["pantalla"] = None
+    if isinstance(sala.get("voces"), dict):
+        sala["voces"] = {}
+
+
 def _sala(data: Dict[str, Any], codigo: str, acta: Optional[str] = None) -> Tuple[Dict[str, Any], bool]:
     sala = data.get(codigo)
     if not isinstance(sala, dict) or "ocupantes" not in sala:
@@ -1271,7 +1312,7 @@ def _sala(data: Dict[str, Any], codigo: str, acta: Optional[str] = None) -> Tupl
     return sala, False
 
 
-def obtener(codigo: str, acta: Optional[str] = None, client: str = "") -> Dict[str, Any]:
+def obtener(codigo: str, acta: Optional[str] = None, client: str = "", ingreso: bool = False) -> Dict[str, Any]:
     codigo = normalizar_codigo(codigo)
     try:
         data = _ALMACEN.leer()
@@ -1280,11 +1321,18 @@ def obtener(codigo: str, acta: Optional[str] = None, client: str = "") -> Dict[s
     except Exception:
         data = {}
     sala, creada = _sala(data, codigo, acta)
-    if creada:
+    limpiar = ingreso and not creada and _conviene_limpiar(sala, client)
+    if creada or limpiar:
         with _WRITE:
             data = _ALMACEN.leer(forzar=True)
             sala, creada = _sala(data, codigo, acta)
             if creada:
+                modo = _ALMACEN.escribir(data)
+            elif ingreso and _conviene_limpiar(sala, client):
+                _limpiar_sesion_previa(sala)
+                sala["rev"] = int(sala.get("rev") or 0) + 1
+                sala["actualizado"] = _ahora()
+                data[codigo] = sala
                 modo = _ALMACEN.escribir(data)
             else:
                 modo = _ALMACEN.modo()

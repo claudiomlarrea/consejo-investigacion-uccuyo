@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=14">
+  <link rel="stylesheet" href="/static/aula.css?v=15">
 </head>
 <body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
@@ -27,32 +27,30 @@
   <section class="guia" id="guia">
     <h2>Entrá a la reunión</h2>
     <p class="nota-meet" id="nota-meet" hidden>Estás en el escenario de Meet. El audio, la cámara, la pantalla y el chat los maneja Meet. Nadie sale de esta reunión.</p>
-    <p class="guia-lead" id="guia-lead">Pegá el enlace de Meet del calendario y tocá Entrar a la reunión. Te quedás en esta aula. El micrófono se enciende acá.</p>
+    <p class="guia-lead" id="guia-lead">Escribí tu nombre y tu función, y tocá Entrar a la reunión. La cámara y el micrófono se prenden abajo, si los querés.</p>
+    <form class="identidad" id="form-entrar">
+      <label class="nombre">
+        Tu nombre
+        <input id="nombre" maxlength="40" autocomplete="off" placeholder="Nombre y apellido">
+      </label>
+      <label class="nombre">
+        Tu función
+        <input id="funcion" maxlength="60" autocomplete="off" placeholder="Secretario de Investigación">
+      </label>
+      <button type="submit" class="btn btn-oro" id="btn-entrar">Entrar a la reunión</button>
+    </form>
     <form class="meet" id="form-meet">
       <label>
         Enlace de Meet
         <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
       </label>
-      <button type="submit" class="btn btn-oro" id="btn-entrar-aula">Entrar a la reunión</button>
+      <a class="btn btn-fantasma" id="abrir-meet" href="#" target="_blank" rel="noopener noreferrer">Abrir Meet</a>
     </form>
-    <div class="identidad">
-      <label class="nombre">
-        Tu nombre
-        <input id="nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
-      </label>
-      <label class="nombre">
-        Tu función
-        <input id="funcion" maxlength="60" placeholder="Secretario de Investigación">
-      </label>
-      <div class="dock-acciones">
-        <button type="button" class="btn btn-oro" id="btn-entrar">Entrar y prender mi cámara</button>
-      </div>
-    </div>
     <div class="mi-camara" id="mi-camara">
       <div id="mi-camara-video">
         <video id="mi-cara" autoplay playsinline muted hidden></video>
       </div>
-      <p id="mi-cara-ayuda">Tu cara va a aparecer acá en cuanto entres.</p>
+      <p id="mi-cara-ayuda">Si prendés la cámara abajo, tu cara aparece acá.</p>
     </div>
   </section>
 
@@ -80,11 +78,11 @@
           <input id="unidad" maxlength="80" placeholder="Facultad, escuela, departamento o secretaría">
         </label>
         <label>
-          N.º de acta
-          <input id="acta" maxlength="24" placeholder="El de esta unidad">
+          N.º de acta (opcional)
+          <input id="acta" maxlength="24" placeholder="Si esta unidad lo usa" autocomplete="off">
         </label>
-        <button type="submit" class="btn btn-oro" id="btn-reunion">Comenzar reunión</button>
-        <button type="button" class="btn btn-fantasma" id="btn-cerrar">Cerrar reunión</button>
+        <button type="submit" class="btn btn-fantasma btn-reunion" id="btn-reunion">Comenzar reunión</button>
+        <button type="button" class="btn btn-fantasma btn-cerrar" id="btn-cerrar">Cerrar reunión</button>
       </form>
       <div class="telon-cabeza">
         <p class="kicker" id="agenda-kicker">Reunión</p>
@@ -168,6 +166,6 @@
   <p class="toast" id="toast" role="status" hidden></p>
 
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=14"></script>
+  <script src="/static/aula.js?v=15"></script>
 </body>
 </html>

@@ -433,9 +433,9 @@ def api_aula_codigo(texto: str = ""):
 
 
 @app.get("/api/aula/{codigo}")
-def api_aula_get(codigo: str, acta: str = "", client: str = ""):
+def api_aula_get(codigo: str, acta: str = "", client: str = "", ingreso: int = 0):
     try:
-        return aula.obtener(codigo, acta or None, client)
+        return aula.obtener(codigo, acta or None, client, bool(ingreso))
     except aula.AulaError as exc:
         raise HTTPException(exc.status, exc.mensaje)
     except ValueError as exc:

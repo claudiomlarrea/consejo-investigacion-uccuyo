@@ -105,6 +105,28 @@ img { display: block; }
   font-weight: 700;
 }
 .btn:disabled { opacity: 0.45; cursor: default; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+.btn-reunion.is-pendiente,
+.btn-cerrar.is-pendiente {
+  background: var(--gold);
+  color: #1c1400;
+  border-color: transparent;
+  opacity: 1;
+}
+.btn-reunion.is-activa,
+.btn-reunion.is-activa:disabled {
+  background: #166534;
+  color: #f0fdf4;
+  border-color: transparent;
+  opacity: 1;
+}
+.btn-cerrar.is-cerrada,
+.btn-cerrar.is-cerrada:disabled {
+  background: #7f1d1d;
+  color: #fff;
+  border-color: transparent;
+  opacity: 1;
+}
 .btn-oro { background: var(--gold); color: #1c1400; }
 .btn.is-vivo { box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.7); }
 .btn-fantasma, .btn-texto {
@@ -161,7 +183,7 @@ img { display: block; }
   font-weight: 700;
   line-height: 1.25;
 }
-.sin-sala main, .sin-sala .guia ol, .sin-sala .identidad, .sin-sala .mi-camara { display: none; }
+.sin-sala main, .sin-sala .guia ol, .sin-sala .mi-camara { display: none; }
 .guia ol { margin: 0; padding-left: 1.2rem; color: #f8e7a8; }
 .guia li { margin: 6px 0; }
 .guia li strong { color: var(--ink); }

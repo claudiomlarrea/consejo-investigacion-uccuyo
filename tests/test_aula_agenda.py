@@ -189,5 +189,64 @@ class AgendaTests(unittest.TestCase):
         self.assertFalse(seguido["adentro"])
 
 
+    def test_acta_opcional_y_recarga_limpia(self):
+        codigo = "limpia-" + uuid.uuid4().hex[:8]
+        client = "cliente-limpia-0001"
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "agregar",
+            "titulo": "Tema de un borrador viejo",
+        })
+        self.assertEqual(vista["temas"], ["Tema de un borrador viejo"])
+        self.assertEqual(aula.obtener(codigo, client=client)["temas"], ["Tema de un borrador viejo"])
+        limpia = aula.obtener(codigo, client=client, ingreso=True)
+        self.assertEqual(limpia["temas"], [])
+        self.assertEqual(limpia["organo"], "")
+
+        otro = "cliente-limpia-0002"
+        aula.aplicar(codigo, {
+            "client": otro,
+            "accion": "perfil",
+            "nombre": "Beto Ruiz",
+            "funcion": "Decano",
+        })
+        aula.aplicar(codigo, {
+            "client": otro,
+            "accion": "agregar",
+            "titulo": "Tema compartido",
+            "rev": aula.obtener(codigo, client=otro)["rev"],
+        })
+        conservado = aula.obtener(codigo, client=client, ingreso=True)
+        self.assertEqual(conservado["temas"], ["Tema compartido"])
+
+        vista = aula.aplicar(codigo, {
+            "client": otro,
+            "accion": "reunion",
+            "organo": "facultad",
+            "unidad": "Facultad de Ingeniería",
+            "acta": "",
+            "rev": conservado["rev"],
+        })
+        self.assertEqual(vista["acta"], "")
+        self.assertEqual(vista["organo"], "facultad")
+        self.assertFalse(vista["cerrada"])
+        en_curso = aula.obtener(codigo, client=otro, ingreso=True)
+        self.assertEqual(en_curso["temas"], ["Tema compartido"])
+        self.assertEqual(en_curso["organo"], "facultad")
+
+        cerrada = aula.aplicar(codigo, {
+            "client": otro,
+            "accion": "cerrar",
+            "rev": en_curso["rev"],
+        })
+        self.assertTrue(cerrada["cerrada"])
+        self.assertEqual(aula.obtener(codigo, client=client, ingreso=True)["temas"], ["Tema compartido"])
+        aula.aplicar(codigo, {"client": otro, "accion": "irse", "rev": cerrada["rev"]})
+        vacia = aula.obtener(codigo, client=client, ingreso=True)
+        self.assertEqual(vacia["temas"], [])
+        self.assertEqual(vacia["organo"], "")
+        self.assertFalse(vacia["cerrada"])
+
+
 if __name__ == "__main__":
     unittest.main()
