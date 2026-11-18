@@ -17,6 +17,9 @@ const state = {
   camara: null,
   frameV: 0,
   lleno: false,
+  meFui: false,
+  cargandoTemas: false,
+  enMeet: false,
 };
 
 if (!state.client) {
@@ -30,6 +33,36 @@ const $ = (id) => document.getElementById(id);
 
 function decir(texto) {
   estadoEl.textContent = texto || "";
+}
+
+let toastTimer = 0;
+function toast(texto) {
+  const caja = $("toast");
+  if (!caja) return;
+  caja.hidden = false;
+  caja.textContent = texto;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    caja.hidden = true;
+  }, 2800);
+}
+
+let avisoTimer = 0;
+function avisoAgenda(texto, error) {
+  const aviso = $("agenda-aviso");
+  if (!aviso) return;
+  if (texto) aviso.dataset.fijo = "1";
+  else delete aviso.dataset.fijo;
+  aviso.textContent = texto || "";
+  aviso.classList.toggle("is-error", Boolean(error && texto));
+  clearTimeout(avisoTimer);
+  if (!texto) return;
+  avisoTimer = setTimeout(() => {
+    if (aviso.textContent !== texto) return;
+    delete aviso.dataset.fijo;
+    aviso.textContent = "";
+    aviso.classList.remove("is-error");
+  }, 8000);
 }
 
 function identidad() {
@@ -76,7 +109,12 @@ async function cargarSala() {
   }
 }
 
-async function enviar(accion, extra) {
+function esAgenda(accion) {
+  return accion === "agregar" || accion === "quitar" || accion === "ir" || accion === "cargar";
+}
+
+async function enviar(accion, extra, reintento) {
+  if (state.meFui && (accion === "pulso" || accion === "perfil")) return false;
   const datos = identidad();
   const cuerpoAccion = Object.assign({
     client: state.client,
@@ -85,6 +123,7 @@ async function enviar(accion, extra) {
     nombre: datos.nombre,
     funcion: datos.funcion,
   }, extra || {});
+  const senalSilenciosa = accion === "senal" && extra && extra.senal && (extra.senal.tipo === "candidates" || extra.senal.tipo === "candidate");
   try {
     state.room = await api("/api/aula/" + encodeURIComponent(state.sala), {
       method: "POST",
@@ -93,10 +132,17 @@ async function enviar(accion, extra) {
     });
     if (accion !== "pulso" && accion !== "senal" && accion !== "voz") decir("");
     pintarSala();
+    return true;
   } catch (err) {
+    if (!reintento && err.message && err.message.indexOf("Reintentá") !== -1) {
+      await cargarSala();
+      return enviar(accion, extra, true);
+    }
     if (err.message && err.message.indexOf("llena") !== -1) state.lleno = true;
-    decir(err.message);
+    if (!senalSilenciosa) decir(err.message);
+    if (esAgenda(accion)) avisoAgenda(err.message, true);
     await cargarSala();
+    return false;
   }
 }
 
@@ -127,6 +173,10 @@ function sentado() {
 function pintarSala() {
   const sala = state.room;
   if (!sala) return;
+  if (state.meFui && sala.adentro && !state.saliendo) {
+    state.saliendo = true;
+    enviar("irse").finally(() => { state.saliendo = false; });
+  }
   const sync = $("sync");
   const compartida = sala.sync === "drive" || sala.sync === "hoja";
   sync.textContent = (compartida ? "Sala compartida" : sala.sync === "degradado" ? "Reconectando" : "Sala de este servidor")
@@ -283,35 +333,32 @@ function pintarPantalla(sala) {
   const local = $("pantalla-local");
   const remota = $("pantalla-remota");
   const quien = $("pantalla-quien");
-  const boton = $("btn-pantalla");
   const activa = sala.pantalla && sala.pantalla.activa;
   if (state.stream && (!activa || !sala.pantalla.propia)) dejarPantalla(false);
   if (!activa) {
     caja.hidden = true;
     local.hidden = true;
     remota.hidden = true;
-    boton.textContent = "Compartir pantalla";
-    return;
+  } else {
+    caja.hidden = false;
+    quien.textContent = sala.pantalla.propia
+      ? "Estás compartiendo tu pantalla. Cualquiera puede reemplazarla."
+      : (sala.pantalla.nombre || "Alguien") + " está compartiendo su pantalla. Podés reemplazarla.";
+    if (sala.pantalla.propia && state.stream) {
+      local.hidden = false;
+      remota.hidden = true;
+      if (local.srcObject !== state.stream) local.srcObject = state.stream;
+    } else {
+      local.hidden = true;
+      remota.hidden = false;
+      const marca = Math.floor(Date.now() / 2000);
+      if (state.frameV !== marca) {
+        state.frameV = marca;
+        remota.src = "/api/aula/" + encodeURIComponent(state.sala) + "/pantalla?v=" + marca;
+      }
+    }
   }
-  caja.hidden = false;
-  quien.textContent = sala.pantalla.propia
-    ? "Estás compartiendo tu pantalla. Cualquiera puede reemplazarla."
-    : (sala.pantalla.nombre || "Alguien") + " está compartiendo su pantalla. Podés reemplazarla.";
-  if (sala.pantalla.propia && state.stream) {
-    local.hidden = false;
-    remota.hidden = true;
-    if (local.srcObject !== state.stream) local.srcObject = state.stream;
-    boton.textContent = "Dejar de compartir";
-    return;
-  }
-  local.hidden = true;
-  remota.hidden = false;
-  const marca = Math.floor(Date.now() / 2000);
-  if (state.frameV !== marca) {
-    state.frameV = marca;
-    remota.src = "/api/aula/" + encodeURIComponent(state.sala) + "/pantalla?v=" + marca;
-  }
-  boton.textContent = "Compartir mi pantalla";
+  pintarControles();
 }
 
 function pintarAgenda() {
@@ -325,23 +372,30 @@ function pintarAgenda() {
   $("agenda-kicker").textContent = partes.concat(acta ? [acta] : []).join(" · ") || "Para comenzar";
   $("agenda-titulo").textContent = items.length
     ? items[indice]
-    : "Todavía no hay temas en el orden del día.";
+    : "Agregá los temas del orden del día.";
   const aviso = $("agenda-aviso");
   if (sala.cerrada) {
     $("agenda-meta").textContent = "La reunión está cerrada. Los temas quedan a la vista.";
+  } else if (items.length && !sala.organo) {
+    $("agenda-meta").textContent = "El orden del día tiene " + items.length + (items.length === 1 ? " tema." : " temas.") + " Quedan guardados cuando comenzás la reunión.";
   } else if (items.length) {
     $("agenda-meta").textContent = "El orden del día tiene " + items.length + (items.length === 1 ? " tema." : " temas.");
   } else {
-    $("agenda-meta").textContent = "Elegí el Word o el PDF del orden del día. Los temas aparecen acá arriba.";
+    $("agenda-meta").textContent = "Escribilos abajo o cargá un Word o un PDF. Aparecen en esta lista ahora, antes de comenzar la reunión.";
   }
-  if (aviso && !aviso.dataset.fijo) aviso.textContent = "";
+  if (aviso && !aviso.dataset.fijo) {
+    aviso.textContent = "";
+    aviso.classList.remove("is-error");
+  }
   const botonReunion = $("btn-reunion");
   if (botonReunion) botonReunion.textContent = sala.organo ? "Actualizar reunión" : "Comenzar reunión";
   const botonCerrar = $("btn-cerrar");
   if (botonCerrar) botonCerrar.textContent = sala.cerrada ? "Reabrir reunión" : "Cerrar reunión";
   const lead = $("guia-lead");
   if (lead) {
-    if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
+    if (state.enMeet) {
+      lead.textContent = "Estás en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet. La mesa, la palabra y el orden del día siguen acá.";
+    } else if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
       lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión: seguís en el aula, en la sala compartida.";
     } else if (!sala.organo) {
       lead.textContent = "Ya estás en la reunión, en esta aula. Completá los datos y tocá Comenzar reunión. El micrófono se enciende acá.";
@@ -349,8 +403,9 @@ function pintarAgenda() {
       lead.textContent = "La reunión comenzó, en esta aula. El micrófono se enciende acá. Los demás entran con el mismo enlace.";
     }
   }
-  $("btn-anterior").disabled = !sala.conduzco || indice <= 0;
-  $("btn-siguiente").disabled = !sala.conduzco || !items.length || indice >= items.length - 1;
+  const puedeEditar = Boolean(sala.conduzco || !sala.organo);
+  $("btn-anterior").disabled = !puedeEditar || indice <= 0;
+  $("btn-siguiente").disabled = !puedeEditar || !items.length || indice >= items.length - 1;
 
   const lista = $("agenda-lista");
   lista.replaceChildren();
@@ -359,14 +414,14 @@ function pintarAgenda() {
     const boton = document.createElement("button");
     boton.type = "button";
     if (i === indice) boton.className = "is-on";
-    boton.disabled = sala.conduzco === false;
+    boton.disabled = !puedeEditar;
     const n = document.createElement("span");
     n.className = "n";
     n.textContent = String(i + 1);
     boton.append(n, document.createTextNode(titulo || "Sin título"));
     boton.addEventListener("click", () => enviar("ir", { tema: i }));
     li.append(boton);
-    if (sala.conduzco) {
+    if (puedeEditar) {
       const quitar = document.createElement("button");
       quitar.type = "button";
       quitar.className = "btn-texto";
@@ -415,24 +470,111 @@ const vocesPc = new Map();
 const vocesHechas = new Set();
 let microLocal = null;
 
-function iceListo(pc) {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
-  return new Promise((resolver) => {
-    const tope = setTimeout(resolver, 2500);
-    pc.addEventListener("icegatheringstatechange", () => {
-      if (pc.iceGatheringState === "complete") {
-        clearTimeout(tope);
-        resolver();
-      }
-    });
+function servidoresIce() {
+  const lista = state.room && state.room.ice;
+  if (lista && lista.length) return lista.map((servidor) => Object.assign({}, servidor));
+  return [{ urls: "stun:stun.l.google.com:19302" }];
+}
+
+const hieloPendiente = new Map();
+let colaIce = [];
+let timerIce = 0;
+let envioIce = Promise.resolve();
+
+function encolarCandidato(otro, candidato) {
+  if (!candidato || !candidato.candidate || vocesPc.get(otro) == null) return;
+  colaIce.push({ para: otro, candidato: candidato });
+  clearTimeout(timerIce);
+  timerIce = setTimeout(vaciarCandidatos, 400);
+}
+
+function vaciarCandidatos() {
+  clearTimeout(timerIce);
+  timerIce = 0;
+  if (!colaIce.length) return;
+  const lote = colaIce.splice(0, colaIce.length);
+  envioIce = envioIce.then(() => publicarCandidatos(lote)).catch(() => {});
+}
+
+async function publicarCandidatos(lote) {
+  const por = new Map();
+  lote.forEach((item) => {
+    if (!vocesPc.has(item.para)) return;
+    const lista = por.get(item.para) || [];
+    lista.push(item.candidato);
+    por.set(item.para, lista);
   });
+  for (const entrada of por) {
+    const para = entrada[0];
+    const lista = entrada[1];
+    for (let i = 0; i < lista.length; i += 12) {
+      await enviar("senal", {
+        senal: { para: para, tipo: "candidates", cuerpo: JSON.stringify(lista.slice(i, i + 12)) },
+      });
+    }
+  }
+}
+
+async function aplicarCandidatos(de, lista) {
+  const pc = vocesPc.get(de);
+  if (!pc || !pc.remoteDescription) {
+    const cola = hieloPendiente.get(de) || [];
+    lista.forEach((item) => cola.push(item));
+    hieloPendiente.set(de, cola);
+    return;
+  }
+  for (let i = 0; i < lista.length; i += 1) {
+    const item = lista[i];
+    if (!item || !item.candidate) continue;
+    try {
+      await pc.addIceCandidate(item);
+    } catch (_err) {
+      /* un candidato repetido no corta el audio */
+    }
+  }
+}
+
+async function drenarCandidatos(de) {
+  const pc = vocesPc.get(de);
+  const cola = hieloPendiente.get(de);
+  if (!pc || !pc.remoteDescription || !cola) return;
+  while (cola.length) {
+    const item = cola.shift();
+    if (!item || !item.candidate) continue;
+    try {
+      await pc.addIceCandidate(item);
+    } catch (_err) {
+      /* sigue con el resto */
+    }
+  }
+}
+
+function candidatosDe(senal) {
+  try {
+    const data = JSON.parse(senal.cuerpo || "");
+    if (senal.tipo === "candidate") return data && data.candidate ? [data] : [];
+    if (senal.tipo === "candidates") return Array.isArray(data) ? data : [];
+  } catch (_err) {
+    return [];
+  }
+  return null;
 }
 
 function crearPc(otro) {
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-  });
+  const pc = new RTCPeerConnection({ iceServers: servidoresIce() });
   vocesPc.set(otro, pc);
+  pc.addEventListener("icecandidate", (evento) => {
+    if (vocesPc.get(otro) !== pc) return;
+    if (!evento.candidate) {
+      vaciarCandidatos();
+      return;
+    }
+    encolarCandidato(otro, {
+      candidate: evento.candidate.candidate,
+      sdpMid: evento.candidate.sdpMid,
+      sdpMLineIndex: evento.candidate.sdpMLineIndex,
+    });
+  });
   pc.addEventListener("track", (evento) => {
     let audio = document.getElementById("voz-" + otro);
     if (!audio) {
@@ -462,7 +604,6 @@ async function ofrecer(otro) {
     const pc = crearPc(otro);
     agregarPistas(pc);
     await pc.setLocalDescription(await pc.createOffer());
-    await iceListo(pc);
     await enviar("senal", { senal: { para: otro, tipo: "offer", cuerpo: pc.localDescription.sdp } });
   } catch (_err) {
     vocesHechas.delete("offer:" + otro);
@@ -482,23 +623,52 @@ async function recibirSenal(senal) {
     if (!pc) pc = crearPc(senal.de);
     agregarPistas(pc);
     await pc.setRemoteDescription({ type: "offer", sdp: senal.cuerpo });
+    await drenarCandidatos(senal.de);
     await pc.setLocalDescription(await pc.createAnswer());
-    await iceListo(pc);
     await enviar("senal", { senal: { para: senal.de, tipo: "answer", cuerpo: pc.localDescription.sdp } });
     return;
   }
-  if (senal.tipo !== "answer") return;
-  const pc = vocesPc.get(senal.de);
-  if (!pc || pc.signalingState !== "have-local-offer") return;
-  await pc.setRemoteDescription({ type: "answer", sdp: senal.cuerpo });
+  if (senal.tipo === "answer") {
+    const pc = vocesPc.get(senal.de);
+    if (!pc || pc.signalingState !== "have-local-offer") return;
+    await pc.setRemoteDescription({ type: "answer", sdp: senal.cuerpo });
+    await drenarCandidatos(senal.de);
+    return;
+  }
+  const candidatos = candidatosDe(senal);
+  if (candidatos) await aplicarCandidatos(senal.de, candidatos);
+}
+
+function cerrarPc(id) {
+  const pc = vocesPc.get(id);
+  if (pc) pc.close();
+  vocesPc.delete(id);
+  vocesHechas.delete("offer:" + id);
+  hieloPendiente.delete(id);
+  const audio = document.getElementById("voz-" + id);
+  if (audio) audio.remove();
+}
+
+function pintarControles() {
+  pintarLlamada("btn-micro", Boolean(microLocal), "Micrófono encendido", "Micrófono apagado", true);
+  pintarLlamada("btn-camara", Boolean(state.camara), "Cámara encendida", "Cámara apagada", true);
+  pintarLlamada("btn-pantalla", Boolean(state.stream), "Dejar de compartir", "Compartir pantalla", false);
+}
+
+function pintarLlamada(id, prendido, encendido, apagado, mudo) {
+  const boton = $(id);
+  if (!boton) return;
+  boton.classList.toggle("is-on", prendido);
+  boton.classList.toggle("is-off", !prendido && mudo);
+  boton.setAttribute("aria-pressed", prendido ? "true" : "false");
+  const texto = prendido ? encendido : apagado;
+  boton.setAttribute("aria-label", texto);
+  const etiqueta = boton.querySelector(".llamada-texto");
+  if (etiqueta) etiqueta.textContent = texto;
 }
 
 function conectarVoces() {
-  const boton = $("btn-micro");
-  if (boton) {
-    boton.textContent = microLocal ? "Apagar micrófono" : "Encender micrófono";
-    boton.classList.toggle("is-vivo", Boolean(microLocal));
-  }
+  pintarControles();
   const sala = state.room;
   if (!sala || !sala.adentro) return;
   const idsVoces = new Set((sala.voces || []).map((voz) => voz.client));
@@ -506,11 +676,7 @@ function conectarVoces() {
   Array.from(vocesPc.keys()).forEach((id) => {
     const sigue = idsVoces.has(id) || (microLocal && otros.indexOf(id) !== -1);
     if (sigue) return;
-    vocesPc.get(id).close();
-    vocesPc.delete(id);
-    vocesHechas.delete("offer:" + id);
-    const audio = document.getElementById("voz-" + id);
-    if (audio) audio.remove();
+    cerrarPc(id);
   });
   if (microLocal) {
     otros.forEach((id) => {
@@ -525,18 +691,49 @@ function conectarVoces() {
   });
 }
 
+function mediosLosManejaMeet() {
+  if (!state.enMeet) return false;
+  decir("El audio, la cámara y la pantalla los maneja Meet. Seguís en el aula.");
+  return true;
+}
+
+function aplicarModoMeet() {
+  state.enMeet = true;
+  document.body.classList.add("en-meet");
+  const nota = $("nota-meet");
+  if (nota) nota.hidden = false;
+  const form = $("form-meet");
+  if (form) form.hidden = true;
+  const guia = document.querySelector("#guia h2");
+  if (guia) guia.textContent = "Tu lugar en el aula";
+  ["btn-micro", "btn-camara", "btn-pantalla", "btn-dejar"].forEach((id) => {
+    const boton = $(id);
+    if (boton) boton.hidden = true;
+  });
+  const avisoBarra = $("nota-barra-meet");
+  if (avisoBarra) avisoBarra.hidden = false;
+  const marca = document.querySelector(".marca");
+  if (marca) {
+    marca.addEventListener("click", (event) => event.preventDefault());
+  }
+}
+
 async function alternarMicrofono() {
   if (microLocal) {
     microLocal.getTracks().forEach((pista) => pista.stop());
     microLocal = null;
     vocesPc.forEach((pc) => pc.close());
     vocesPc.clear();
+    hieloPendiente.clear();
+    colaIce = [];
     document.querySelectorAll("audio[id^='voz-']").forEach((nodo) => nodo.remove());
     if (state.room && state.room.adentro) await enviar("voz", { micro: false });
     conectarVoces();
     decir("Micrófono apagado. Seguís en el aula.");
     return;
   }
+  if (mediosLosManejaMeet()) return;
+  state.meFui = false;
   if (!state.sala) {
     decir("Pegá el enlace y tocá Entrar a la reunión. El micrófono se enciende en esta aula.");
     $("meet").focus();
@@ -558,17 +755,20 @@ async function alternarMicrofono() {
   decir("Micrófono encendido. Seguís en el aula.");
 }
 
-async function cargarArchivo() {
+async function cargarArchivo(reintento) {
   const input = $("archivo-temas");
   const archivo = input.files && input.files[0];
   if (!archivo) {
-    decir("Elegí un Word (.docx) o un PDF con los temas.");
+    avisoAgenda("Elegí un Word (.docx) o un PDF con los temas.", true);
     return;
   }
-  if (!state.room || !state.room.adentro) {
-    decir("Entrá con tu nombre y tu función para cargar los temas.");
+  if (!state.room) {
+    avisoAgenda("La sala todavía no cargó. Probá de nuevo en un momento.", true);
     return;
   }
+  if (state.cargandoTemas) return;
+  state.cargandoTemas = true;
+  avisoAgenda("Cargando temas de " + archivo.name + "…", false);
   const datos = new FormData();
   datos.append("archivo", archivo);
   datos.append("client", state.client);
@@ -581,22 +781,19 @@ async function cargarArchivo() {
     input.value = "";
     pintarSala();
     const cantidad = (state.room.temas || []).length;
-    const texto = "Temas cargados. El orden del día tiene " + cantidad + ".";
-    const aviso = $("agenda-aviso");
-    if (aviso) {
-      aviso.dataset.fijo = "1";
-      aviso.textContent = texto;
-    }
-    decir(texto);
-    const titulo = $("agenda-titulo");
-    if (titulo) titulo.scrollIntoView({ block: "center" });
+    const texto = "Temas cargados. El orden del día tiene " + cantidad + (cantidad === 1 ? " tema." : " temas.");
+    avisoAgenda(texto, false);
+    const lista = $("agenda-lista");
+    if (lista) lista.scrollIntoView({ block: "nearest" });
   } catch (err) {
-    const aviso = $("agenda-aviso");
-    if (aviso) {
-      aviso.dataset.fijo = "1";
-      aviso.textContent = err.message;
+    if (!reintento && err.message && err.message.indexOf("Reintentá") !== -1) {
+      state.cargandoTemas = false;
+      await cargarSala();
+      return cargarArchivo(true);
     }
-    decir(err.message);
+    avisoAgenda(err.message, true);
+  } finally {
+    state.cargandoTemas = false;
   }
 }
 
@@ -609,24 +806,78 @@ async function cerrarReunion() {
   const cerrar = !state.room.cerrada;
   await enviar(cerrar ? "cerrar" : "reabrir");
   const texto = state.room && state.room.cerrada ? "Reunión cerrada." : "La reunión sigue abierta.";
-  const aviso = $("agenda-aviso");
-  if (aviso) {
-    aviso.dataset.fijo = "1";
-    aviso.textContent = texto;
-  }
+  avisoAgenda(texto, false);
   decir(texto);
 }
 
 async function agregarTema(event) {
   event.preventDefault();
   const titulo = $("tema-titulo").value.trim();
-  if (!titulo) return;
-  if (!state.room || !state.room.adentro) {
-    decir("Entrá con tu nombre y tu función para cargar temas.");
+  if (!titulo) {
+    avisoAgenda("Escribí el tema.", true);
     return;
   }
-  await enviar("agregar", { titulo: titulo });
+  if (!state.room) {
+    avisoAgenda("La sala todavía no cargó. Probá de nuevo en un momento.", true);
+    return;
+  }
+  avisoAgenda("Agregando el tema…", false);
+  const ok = await enviar("agregar", { titulo: titulo });
+  if (!ok) return;
   $("tema-titulo").value = "";
+  const cantidad = (state.room.temas || []).length;
+  avisoAgenda("Tema agregado. El orden del día tiene " + cantidad + (cantidad === 1 ? " tema." : " temas."), false);
+  const lista = $("agenda-lista");
+  if (lista) lista.scrollIntoView({ block: "nearest" });
+}
+
+async function copiarEnlace() {
+  if (!state.sala) {
+    toast("Todavía no hay un enlace del aula.");
+    return;
+  }
+  const url = location.href;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast("Enlace del aula copiado.");
+      return;
+    }
+  } catch (_err) {
+    /* el plan B sigue */
+  }
+  const campo = document.createElement("textarea");
+  campo.value = url;
+  campo.setAttribute("readonly", "");
+  campo.style.position = "fixed";
+  campo.style.left = "-9999px";
+  document.body.appendChild(campo);
+  campo.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (_err) {
+    ok = false;
+  }
+  campo.remove();
+  toast(ok ? "Enlace del aula copiado." : "No pude copiar el enlace.");
+}
+
+async function salirDelAula() {
+  if (state.saliendo) return;
+  state.saliendo = true;
+  state.meFui = true;
+  try {
+    if (microLocal) await alternarMicrofono();
+    if (state.camara) await apagarCamara();
+    if (state.stream) await dejarPantalla(true);
+    if (state.room && state.room.adentro) await enviar("irse");
+    pintarControles();
+    toast("Saliste del aula.");
+    decir("Saliste del aula. Podés volver a entrar cuando quieras.");
+  } finally {
+    state.saliendo = false;
+  }
 }
 
 function origenCompartido() {
@@ -639,6 +890,10 @@ function origenCompartido() {
 
 async function guardarMeet(event) {
   event.preventDefault();
+  if (state.enMeet) {
+    decir("Ya estás en Meet. El aula sigue en esta reunión.");
+    return;
+  }
   const crudo = $("meet").value.trim();
   if (!crudo) {
     decir("Pegá el enlace de Meet del calendario.");
@@ -661,22 +916,50 @@ async function guardarMeet(event) {
   location.href = destino;
 }
 
-async function engancharMeet() {
-  if (window.parent === window) return;
-  const project = cuerpo.dataset.meetProject;
-  if (!project || !window.meet || !window.meet.addon) return;
+async function estadoInicial(cliente) {
   try {
-    const session = await window.meet.addon.createAddonSession({ cloudProjectNumber: String(project) });
+    const estado = await cliente.getActivityStartingState();
+    return estado || null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function engancharMeet() {
+  if (window.parent === window) return false;
+  const project = cuerpo.dataset.meetProject;
+  if (!project || !window.meet || !window.meet.addon) return false;
+  try {
+    const session = await window.meet.addon.createAddonSession({
+      cloudProjectNumber: String(project),
+    });
     const main = await session.createMainStageClient();
-    const info = await main.getMeetingInfo();
-    const codigo = info && info.meetingCode ? String(info.meetingCode).toLowerCase() : "";
+    aplicarModoMeet();
+    let codigo = "";
+    try {
+      const info = await main.getMeetingInfo();
+      codigo = info && info.meetingCode ? String(info.meetingCode).toLowerCase() : "";
+    } catch (_err) {
+      codigo = "";
+    }
+    try {
+      const inicial = await estadoInicial(main);
+      if (inicial && inicial.additionalData) {
+        const extra = JSON.parse(inicial.additionalData);
+        if (extra && extra.sala) codigo = String(extra.sala).toLowerCase();
+      }
+    } catch (_err) {
+      /* el código de la reunión alcanza */
+    }
     if (codigo && codigo !== state.sala) {
       const url = new URL(location.href);
       url.searchParams.set("sala", codigo);
-      location.replace(url.href);
+      location.replace(url.pathname + url.search);
+      return true;
     }
+    return false;
   } catch (_err) {
-    decir("Meet no abrió la sesión del complemento. El aula sigue en esta página.");
+    return false;
   }
 }
 
@@ -703,6 +986,7 @@ function latido() {
 }
 
 async function prenderCamara() {
+  if (state.enMeet) return false;
   if (state.camara) return true;
   try {
     state.camara = await navigator.mediaDevices.getUserMedia({
@@ -717,7 +1001,7 @@ async function prenderCamara() {
   video.hidden = false;
   video.srcObject = state.camara;
   $("mi-cara-ayuda").hidden = true;
-  $("btn-camara").textContent = "Apagar mi cámara";
+  pintarControles();
   return true;
 }
 
@@ -732,7 +1016,7 @@ async function apagarCamara() {
   video.srcObject = null;
   video.hidden = true;
   $("mi-cara-ayuda").hidden = false;
-  $("btn-camara").textContent = "Prender mi cámara";
+  pintarControles();
   if (state.room && state.room.adentro) await enviar("camara", { camara: false });
 }
 
@@ -769,14 +1053,22 @@ async function enviarCara() {
 }
 
 async function entrar() {
+  state.meFui = false;
   if (!exigirIdentidad()) return;
+  if (state.enMeet) {
+    await enviar("perfil");
+    if (state.room && state.room.adentro) {
+      decir("Entraste al aula. El audio, la cámara y la pantalla los maneja Meet.");
+    }
+    return;
+  }
   const camara = prenderCamara();
   await enviar("perfil");
   const videoOk = await camara;
   if (videoOk) {
     await enviar("camara", { camara: true });
     arrancarEnvioCara();
-    decir("Ya estás en la sala y se ve tu cara. El micrófono se enciende acá, con el botón de arriba.");
+    decir("Ya estás en la sala y se ve tu cara. El micrófono se enciende con el botón de abajo.");
   } else if (state.room && state.room.adentro) {
     decir("Entraste. La cámara no se prendió: probá «Prender mi cámara». El micrófono se enciende acá.");
   }
@@ -787,6 +1079,8 @@ async function alternarCamara() {
     await apagarCamara();
     return;
   }
+  if (mediosLosManejaMeet()) return;
+  state.meFui = false;
   if (!exigirIdentidad()) return;
   if (!(await prenderCamara())) return;
   await enviar("perfil");
@@ -799,6 +1093,8 @@ async function compartirPantalla() {
     await dejarPantalla(true);
     return;
   }
+  if (mediosLosManejaMeet()) return;
+  state.meFui = false;
   if (!exigirIdentidad()) return;
   let stream;
   try {
@@ -873,6 +1169,8 @@ async function iniciar() {
   $("form-tema").addEventListener("submit", agregarTema);
   $("form-meet").addEventListener("submit", guardarMeet);
   $("btn-micro").addEventListener("click", encenderMicrofono);
+  $("btn-dejar").addEventListener("click", () => salirDelAula());
+  $("btn-copiar").addEventListener("click", () => copiarEnlace());
   $("btn-archivo").addEventListener("click", cargarArchivo);
   $("archivo-temas").addEventListener("change", () => {
     if ($("archivo-temas").files && $("archivo-temas").files.length) cargarArchivo();
@@ -884,10 +1182,13 @@ async function iniciar() {
     return;
   }
 
-  await engancharMeet();
+  const recarga = await engancharMeet();
+  if (recarga) return;
   await cargarSala();
   if (state.nombre && state.funcion) await enviar("perfil");
-  if (state.room && !state.room.organo) {
+  if (state.enMeet) {
+    decir("El aula está en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet.");
+  } else if (state.room && !state.room.organo) {
     decir("Ya estás en la reunión, en esta aula. El micrófono se enciende acá. Falta tocar Comenzar reunión.");
   }
   arrancarPoll();

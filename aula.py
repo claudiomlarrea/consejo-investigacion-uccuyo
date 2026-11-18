@@ -7,12 +7,13 @@ Con la cuenta de servicio, el estado vive en un archivo de Drive de esa cuenta
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
 import uuid
 from datetime import date, datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from catalogo import ACTAS, FECHAS
@@ -96,6 +97,26 @@ def enlace_meet(codigo: str) -> Optional[str]:
     if _MEET.fullmatch(codigo):
         return "https://meet.google.com/" + codigo
     return None
+
+
+def ice_servers() -> List[Dict[str, Any]]:
+    """STUN de siempre, más TURN si hay TURN_URLS en el entorno.
+
+    TURN_URLS acepta varias URLs separadas por coma o espacio.
+    TURN_USERNAME y TURN_CREDENTIAL se agregan solo si están definidas.
+    """
+    stun = {"urls": "stun:stun.l.google.com:19302"}
+    urls = [parte.strip() for parte in re.split(r"[\s,]+", os.environ.get("TURN_URLS", "")) if parte.strip()]
+    if not urls:
+        return [stun]
+    servidor: Dict[str, Any] = {"urls": urls[0] if len(urls) == 1 else urls}
+    usuario = os.environ.get("TURN_USERNAME", "").strip()
+    clave = os.environ.get("TURN_CREDENTIAL", "").strip()
+    if usuario:
+        servidor["username"] = usuario
+    if clave:
+        servidor["credential"] = clave
+    return [stun, servidor]
 
 
 class AulaError(Exception):
@@ -214,6 +235,7 @@ def _asegurar_forma(sala: Dict[str, Any]) -> None:
     sala.setdefault("voces", {})
     sala.setdefault("senales", [])
     sala.setdefault("senal_seq", 0)
+    sala.setdefault("salidas", {})
     sala.setdefault("cerrada", False)
     if isinstance(sala.get("acta"), int):
         sala["acta"] = str(sala["acta"])
@@ -261,6 +283,13 @@ def _purgar(sala: Dict[str, Any]) -> None:
     voces = sala.get("voces") or {}
     if isinstance(voces, dict):
         sala["voces"] = {cid: info for cid, info in voces.items() if cid in vivos}
+    salidas = sala.get("salidas") or {}
+    if isinstance(salidas, dict):
+        sala["salidas"] = {
+            cid: visto
+            for cid, visto in salidas.items()
+            if ahora - int(visto or 0) <= 120
+        }
 
 
 def _rotulo(ocupante: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -301,6 +330,13 @@ def _marcar(sala: Dict[str, Any], client: str, nombre: str, funcion: str = "") -
 def _exigir_adentro(sala: Dict[str, Any], client: str) -> None:
     if not _adentro(sala, client):
         raise AulaError(403, "Entrá con tu nombre y tu función para armar la reunión.")
+
+
+def _puede_armar_od(sala: Dict[str, Any], client: str) -> None:
+    """El orden del día se arma antes de comenzar. Con la reunión abierta, hace falta haber entrado."""
+    if _adentro(sala, client) or not sala.get("organo"):
+        return
+    raise AulaError(403, "Entrá con tu nombre y tu función para cambiar el orden del día.")
 
 
 def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[str, Any]:
@@ -393,7 +429,36 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
             if isinstance(item, dict) and str(item.get("para") or "") == client
         ],
         "cerrada": bool(sala.get("cerrada")),
+        "ice": ice_servers(),
     }
+
+
+def _normalizar_candidatos(tipo: str, cuerpo: str) -> str:
+    if len(cuerpo) > 8000:
+        raise AulaError(400, "La señal de audio no es válida.")
+    try:
+        crudo = json.loads(cuerpo)
+    except (TypeError, ValueError):
+        raise AulaError(400, "La señal de audio no es válida.")
+    items = [crudo] if tipo == "candidate" else crudo
+    if not isinstance(items, list) or not items or len(items) > 16:
+        raise AulaError(400, "La señal de audio no es válida.")
+    limpios = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise AulaError(400, "La señal de audio no es válida.")
+        cand = str(item.get("candidate") or "")
+        if not cand.startswith("candidate:") or len(cand) > 800:
+            raise AulaError(400, "La señal de audio no es válida.")
+        limpio: Dict[str, Any] = {"candidate": cand}
+        mid = item.get("sdpMid")
+        if mid not in (None, ""):
+            limpio["sdpMid"] = str(mid)[:32]
+        linea = item.get("sdpMLineIndex")
+        if linea is not None and str(linea).lstrip("-").isdigit():
+            limpio["sdpMLineIndex"] = int(linea)
+        limpios.append(limpio)
+    return json.dumps(limpios, ensure_ascii=False)
 
 
 def _cliente(body: Dict[str, Any]) -> str:
@@ -414,6 +479,9 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
 
     if accion == "pulso":
         if client not in _vivos(sala):
+            salio = int((sala.get("salidas") or {}).get(client) or 0)
+            if _ahora_s() - salio < 30:
+                return False
             nombre = _limpiar_nombre(str(body.get("nombre") or "")) if body.get("nombre") else ""
             if not nombre:
                 return False
@@ -423,6 +491,8 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         return False
 
     if accion in ("entrar", "perfil"):
+        if isinstance(sala.get("salidas"), dict):
+            sala["salidas"].pop(client, None)
         nombre = _limpiar_nombre(str(body.get("nombre") or ""))
         funcion = _limpiar_funcion(str(body.get("funcion") or ""))
         previo = sala["presentes"].get(client)
@@ -476,6 +546,24 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
             if sala["cola"]:
                 sala["turno"] = sala["cola"].pop(0)
         return True
+
+    if accion == "irse":
+        previo = _asiento_de(sala, client)
+        if previo is not None:
+            sala["ocupantes"].pop(str(previo), None)
+            _quitar_de_cola(sala, previo)
+            if sala.get("turno") == previo:
+                sala["turno"] = sala["cola"].pop(0) if sala["cola"] else None
+        estaba = client in (sala.get("presentes") or {})
+        sala.get("presentes", {}).pop(client, None)
+        voces = sala.get("voces") or {}
+        if isinstance(voces, dict):
+            voces.pop(client, None)
+        pantalla = sala.get("pantalla") or {}
+        if str(pantalla.get("client") or "") == client:
+            sala["pantalla"] = None
+        sala.setdefault("salidas", {})[client] = _ahora_s()
+        return estaba or previo is not None
 
     if accion == "camara":
         if client not in _vivos(sala):
@@ -564,7 +652,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         return True
 
     if accion == "agregar":
-        _exigir_adentro(sala, client)
+        _puede_armar_od(sala, client)
         titulo = " ".join(str(body.get("titulo") or "").split())
         if not titulo:
             raise AulaError(400, "Escribí el tema.")
@@ -574,7 +662,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         return True
 
     if accion == "cargar":
-        _exigir_adentro(sala, client)
+        _puede_armar_od(sala, client)
         titulos = body.get("titulos") or []
         if not isinstance(titulos, list):
             raise AulaError(400, "Ese archivo no tiene temas.")
@@ -595,7 +683,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         return True
 
     if accion == "quitar":
-        _exigir_adentro(sala, client)
+        _puede_armar_od(sala, client)
         try:
             indice = int(body.get("tema"))
         except (TypeError, ValueError):
@@ -608,7 +696,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         return True
 
     if accion == "ir":
-        _exigir_adentro(sala, client)
+        _puede_armar_od(sala, client)
         try:
             tema = int(body.get("tema"))
         except (TypeError, ValueError):
@@ -636,10 +724,14 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         tipo = str(senal.get("tipo") or "")
         para = str(senal.get("para") or "")
         cuerpo = str(senal.get("cuerpo") or "")
-        if tipo not in ("offer", "answer") or len(para) < 8 or len(para) > 80:
+        if tipo not in ("offer", "answer", "candidate", "candidates") or len(para) < 8 or len(para) > 80:
             raise AulaError(400, "La señal de audio no es válida.")
-        if "v=0" not in cuerpo[:80] or len(cuerpo) > 12000:
-            raise AulaError(400, "La señal de audio no es válida.")
+        if tipo in ("offer", "answer"):
+            if "v=0" not in cuerpo[:120] or len(cuerpo) > 12000:
+                raise AulaError(400, "La señal de audio no es válida.")
+        else:
+            tipo = "candidates"
+            cuerpo = _normalizar_candidatos(str(senal.get("tipo") or ""), cuerpo)
         sala["senal_seq"] = int(sala.get("senal_seq") or 0) + 1
         lista = sala.setdefault("senales", [])
         lista.append({
@@ -649,8 +741,8 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
             "tipo": tipo,
             "cuerpo": cuerpo,
         })
-        if len(lista) > 30:
-            del lista[:-30]
+        if len(lista) > 80:
+            del lista[:-80]
         return True
 
     if accion == "cerrar":
@@ -1295,6 +1387,7 @@ def manifest(origen: str) -> Dict[str, Any]:
             "meet": {
                 "web": {
                     "sidePanelUrl": origen.rstrip("/") + "/aula/panel",
+                    "mainStageUrl": origen.rstrip("/") + "/aula",
                     "supportsScreenSharing": True,
                     "addOnOrigins": [origen.rstrip("/")],
                     "logoUrl": logo,

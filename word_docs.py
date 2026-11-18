@@ -130,7 +130,7 @@ def aplicar_orden_od(
     return aplicar_orden_unidades(base, orden_unidades)
 
 
-_RE_ITEM = re.compile(r"^(\d+)\.\s+(.+?)\s+-\s+(.+)$")
+_RE_ITEM = re.compile(r"^(\d+)\.\s+(.+?)\s+[-–—]\s+(.+)$")
 _RE_CAMPO = re.compile(
     r"^\s*(Descripción|Director|Codirector|Equipo|Unidad Académica|Puntaje|"
     r"Resolución CD|Resolución CS(?: del Proyecto)?|Instituto|Cátedra|Cátedras|"
@@ -196,7 +196,7 @@ def parsear_od_docx(data: bytes, numero: int, fecha: str) -> List[Dict[str, Any]
         lineas = [ln for ln in para.text.replace("\r", "").split("\n") if ln.strip()]
         if not lineas:
             continue
-        primero = lineas[0].strip()
+        primero = lineas[0].strip().replace("\u00a0", " ").replace("\u2011", "-")
         item = _RE_ITEM.match(primero)
         if item:
             if actual:
