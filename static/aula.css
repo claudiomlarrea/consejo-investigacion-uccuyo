@@ -141,6 +141,8 @@ img { display: block; }
   border: 1px solid rgba(234, 179, 8, 0.4);
 }
 .guia h2 { margin: 0 0 8px; font-size: 1.05rem; }
+.guia-lead { margin: 0 0 12px; color: #f8e7a8; }
+.sin-sala main, .sin-sala .guia ol, .sin-sala .identidad, .sin-sala .mi-camara { display: none; }
 .guia ol { margin: 0; padding-left: 1.2rem; color: #f8e7a8; }
 .guia li { margin: 6px 0; }
 .guia li strong { color: var(--ink); }

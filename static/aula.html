@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=6">
+  <link rel="stylesheet" href="/static/aula.css?v=7">
 </head>
 <body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
@@ -26,11 +26,19 @@
   </header>
 
   <section class="guia" id="guia">
-    <h2>Cómo se usa</h2>
+    <h2>El enlace es el de Google Meet</h2>
+    <p class="guia-lead" id="guia-lead">El del calendario. Todos pegan ese mismo enlace acá y entran a la misma aula.</p>
+    <form class="meet" id="form-meet">
+      <label>
+        Enlace de Meet del calendario
+        <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
+      </label>
+      <button type="submit" class="btn btn-oro" id="btn-entrar-aula">Entrar al aula</button>
+    </form>
     <ol>
-      <li><strong>Primero entrá acá.</strong> Escribí tu nombre y tu función, por ejemplo Secretario de Investigación. Con ese clic se prende la cámara y tu cara queda en la sala.</li>
-      <li><strong>El audio se escucha en Meet.</strong> Si ya tenés la llamada, pegá el enlace al final de esta página. Si todavía no, abrí Meet y, cuando te dé el enlace, pegalo acá.</li>
-      <li><strong>Los demás entran con el enlace del aula</strong>, no alcanza con el de Meet. Copialo y pegalo en el chat. Cualquiera que entre puede compartir su pantalla.</li>
+      <li><strong>Entrar:</strong> pegá el enlace de Meet y tocá Entrar al aula. Si esta página ya tiene ese código, ya estás adentro.</li>
+      <li><strong>Comenzar:</strong> nombre, función, órgano, unidad y número de acta. Después, Comenzar reunión.</li>
+      <li><strong>Escuchar:</strong> Abrir Meet. Esta página muestra las caras, la función y la pantalla. Cualquiera puede compartir su pantalla.</li>
     </ol>
     <div class="identidad">
       <label class="nombre">
@@ -82,7 +90,7 @@
           N.º de acta
           <input id="acta" maxlength="24" placeholder="El de esta unidad">
         </label>
-        <button type="submit" class="btn btn-fantasma">Guardar reunión</button>
+        <button type="submit" class="btn btn-oro" id="btn-reunion">Comenzar reunión</button>
       </form>
       <div class="telon-cabeza">
         <p class="kicker" id="agenda-kicker">Reunión</p>
@@ -124,18 +132,11 @@
         <summary id="roster-cuenta">En la sala</summary>
         <p id="roster-lista"></p>
       </details>
-      <form class="meet" id="form-meet">
-        <label>
-          Si ya tenés Meet, pegá el enlace
-          <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
-        </label>
-        <button type="submit" class="btn btn-fantasma">Guardar enlace de Meet</button>
-      </form>
       <p class="estado" id="estado" role="status"></p>
     </section>
   </main>
 
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=6"></script>
+  <script src="/static/aula.js?v=7"></script>
 </body>
 </html>
