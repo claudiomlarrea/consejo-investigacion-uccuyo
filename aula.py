@@ -51,7 +51,7 @@ ARCHIVO = "consejo-aula-salas.json"
 _CODIGO = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 _MEET = re.compile(r"^[a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4}$")
 CUPO = 100
-PRESENCIA_SEG = 90
+PRESENCIA_SEG = 45
 _CACHE_S = 2.5
 _FLUSH_S = 8
 _FRAME_MAX = 180_000
@@ -245,16 +245,15 @@ def _asegurar_forma(sala: Dict[str, Any]) -> None:
     sala["acta"] = str(sala.get("acta") or "")
     if not isinstance(sala.get("temas"), list):
         sala["temas"] = []
-    if sala["presentes"]:
+    if sala.get("presentes"):
         return
-    ahora = _ahora_s()
     for ocupante in sala.get("ocupantes", {}).values():
         cid = str(ocupante.get("client") or "")
         if cid:
             sala["presentes"][cid] = {
                 "nombre": ocupante.get("nombre") or "",
                 "funcion": ocupante.get("funcion") or "",
-                "visto": ahora,
+                "visto": int(ocupante.get("visto") or 0),
             }
 
 
@@ -609,12 +608,23 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         asiento = _asiento_de(sala, client)
         if asiento is None:
             raise AulaError(403, "Sentate para pedir la palabra.")
-        if sala.get("turno") == asiento or asiento in sala["cola"]:
-            return False
-        if sala.get("turno") is None:
-            sala["turno"] = asiento
+        if sala.get("turno") == asiento:
+            raise AulaError(400, "Ya tenés la palabra. Cuando termines, tocá Cedo la palabra.")
+        if asiento in sala["cola"]:
+            _quitar_de_cola(sala, asiento)
             return True
         sala["cola"].append(asiento)
+        return True
+
+    if accion == "bajar":
+        _exigir_adentro(sala, client)
+        try:
+            asiento = int(body.get("asiento"))
+        except (TypeError, ValueError):
+            asiento = _asiento_de(sala, client)
+        if asiento is None or asiento not in sala["cola"]:
+            raise AulaError(400, "Esa persona no tiene la mano levantada.")
+        _quitar_de_cola(sala, asiento)
         return True
 
     if accion == "conceder":
@@ -750,9 +760,18 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
 
     if accion == "cerrar":
         _exigir_adentro(sala, client)
+        if not sala.get("organo"):
+            raise AulaError(400, "La reunión no empezó. Descartá el borrador si querés limpiar los temas.")
         sala["cerrada"] = True
         sala["turno"] = None
         sala["cola"] = []
+        return True
+
+    if accion == "descartar":
+        _exigir_adentro(sala, client)
+        if sala.get("organo") and not sala.get("cerrada"):
+            raise AulaError(400, "La reunión está en curso. Tocá Cerrar reunión.")
+        _limpiar_sesion_previa(sala)
         return True
 
     if accion == "reabrir":
@@ -1315,27 +1334,55 @@ def _sala(data: Dict[str, Any], codigo: str, acta: Optional[str] = None) -> Tupl
 def obtener(codigo: str, acta: Optional[str] = None, client: str = "", ingreso: bool = False) -> Dict[str, Any]:
     codigo = normalizar_codigo(codigo)
     try:
-        data = _ALMACEN.leer()
+        data = _ALMACEN.leer(forzar=bool(ingreso))
     except AulaError:
         raise
     except Exception:
         data = {}
     sala, creada = _sala(data, codigo, acta)
-    limpiar = ingreso and not creada and _conviene_limpiar(sala, client)
-    if creada or limpiar:
+    if creada or ingreso:
         with _WRITE:
             data = _ALMACEN.leer(forzar=True)
             sala, creada = _sala(data, codigo, acta)
             if creada:
                 modo = _ALMACEN.escribir(data)
-            elif ingreso and _conviene_limpiar(sala, client):
-                _limpiar_sesion_previa(sala)
-                sala["rev"] = int(sala.get("rev") or 0) + 1
-                sala["actualizado"] = _ahora()
-                data[codigo] = sala
-                modo = _ALMACEN.escribir(data)
             else:
-                modo = _ALMACEN.modo()
+                antes = json.dumps(
+                    {
+                        "presentes": sala.get("presentes"),
+                        "ocupantes": sala.get("ocupantes"),
+                        "temas": sala.get("temas"),
+                        "organo": sala.get("organo"),
+                        "cerrada": sala.get("cerrada"),
+                        "cola": sala.get("cola"),
+                        "turno": sala.get("turno"),
+                    },
+                    sort_keys=True,
+                    default=str,
+                )
+                _purgar(sala)
+                if ingreso and _conviene_limpiar(sala, client):
+                    _limpiar_sesion_previa(sala)
+                despues = json.dumps(
+                    {
+                        "presentes": sala.get("presentes"),
+                        "ocupantes": sala.get("ocupantes"),
+                        "temas": sala.get("temas"),
+                        "organo": sala.get("organo"),
+                        "cerrada": sala.get("cerrada"),
+                        "cola": sala.get("cola"),
+                        "turno": sala.get("turno"),
+                    },
+                    sort_keys=True,
+                    default=str,
+                )
+                if antes != despues:
+                    sala["rev"] = int(sala.get("rev") or 0) + 1
+                    sala["actualizado"] = _ahora()
+                    data[codigo] = sala
+                    modo = _ALMACEN.escribir(data)
+                else:
+                    modo = _ALMACEN.modo()
     else:
         modo = _ALMACEN.modo()
     return _vista(codigo, sala, client, modo)

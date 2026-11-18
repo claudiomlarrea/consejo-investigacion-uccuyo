@@ -247,6 +247,86 @@ class AgendaTests(unittest.TestCase):
         self.assertEqual(vacia["organo"], "")
         self.assertFalse(vacia["cerrada"])
 
+    def test_presencia_vencida_no_conserva_el_borrador(self):
+        codigo = "vieja-" + uuid.uuid4().hex[:8]
+        viejo = "cliente-viejo-0001"
+        aula.aplicar(codigo, {
+            "client": viejo,
+            "accion": "perfil",
+            "nombre": "Viejo",
+            "funcion": "Ayudante",
+        })
+        rev = aula.obtener(codigo, client=viejo)["rev"]
+        aula.aplicar(codigo, {
+            "client": viejo,
+            "accion": "agregar",
+            "titulo": "Tema viejo",
+            "rev": rev,
+        })
+        data = aula._ALMACEN.leer(forzar=True)
+        data[codigo]["presentes"][viejo]["visto"] = aula._ahora_s() - 80
+        aula._ALMACEN.escribir(data)
+        aula._ALMACEN._cache = None
+        limpio = aula.obtener(codigo, client="cliente-nuevo-0002", ingreso=True)
+        self.assertEqual(limpio["temas"], [])
+        self.assertEqual(limpio["presentes"], 0)
+
+    def test_la_mano_se_levanta_y_se_baja(self):
+        codigo = "mano-" + uuid.uuid4().hex[:8]
+        client = "cliente-mano-0001"
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "perfil",
+            "nombre": "Ana Pérez",
+            "funcion": "Secretaria",
+        })
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "sentarse",
+            "asiento": 0,
+            "nombre": "Ana Pérez",
+            "funcion": "Secretaria",
+            "rev": vista["rev"],
+        })
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "palabra",
+            "rev": vista["rev"],
+        })
+        self.assertEqual([p["id"] for p in vista["cola"]], [0])
+        self.assertIsNone(vista["turno"])
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "palabra",
+            "rev": vista["rev"],
+        })
+        self.assertEqual(vista["cola"], [])
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "palabra",
+            "rev": vista["rev"],
+        })
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "conceder",
+            "rev": vista["rev"],
+        })
+        self.assertEqual(vista["turno"]["id"], 0)
+        self.assertEqual(vista["cola"], [])
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "agregar",
+            "titulo": "Borrador para descartar",
+            "rev": vista["rev"],
+        })
+        vista = aula.aplicar(codigo, {
+            "client": client,
+            "accion": "descartar",
+            "rev": vista["rev"],
+        })
+        self.assertEqual(vista["temas"], [])
+        self.assertEqual(vista["organo"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

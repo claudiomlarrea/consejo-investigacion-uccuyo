@@ -209,11 +209,30 @@ function pintarSala() {
   pintarAsientos(sala, turno);
 
   const cola = $("cola");
-  cola.textContent = sala.cola.length
-    ? "Piden la palabra: " + sala.cola.map((p) => p.nombre).filter(Boolean).join(", ")
-    : "";
+  cola.replaceChildren();
+  if (sala.cola.length) {
+    cola.append(document.createTextNode("Piden la palabra: "));
+    sala.cola.forEach((persona, indiceCola) => {
+      if (indiceCola) cola.append(document.createTextNode(", "));
+      cola.append(document.createTextNode(persona.nombre || "Alguien"));
+      if (sala.conduzco && persona.id !== sala.sentado) {
+        const bajar = document.createElement("button");
+        bajar.type = "button";
+        bajar.className = "btn btn-texto";
+        bajar.textContent = "Bajar la mano";
+        bajar.addEventListener("click", () => enviar("bajar", { asiento: persona.id }));
+        cola.append(document.createTextNode(" "));
+        cola.append(bajar);
+      }
+    });
+  }
 
-  $("btn-palabra").disabled = !sentado();
+  const yoPide = Boolean(sentado() && (sala.cola || []).some((persona) => persona.id === sala.sentado));
+  const botonPalabra = $("btn-palabra");
+  botonPalabra.disabled = !sentado();
+  botonPalabra.textContent = yoPide ? "Bajar la mano" : "Pedir la palabra";
+  botonPalabra.classList.toggle("btn-oro", !yoPide);
+  botonPalabra.classList.toggle("btn-mano", yoPide);
   $("btn-salir").disabled = !sentado();
   $("btn-conceder").disabled = !sala.conduzco || !sala.cola.length;
   const hablo = turno && sentado() && turno.id === sala.sentado;
@@ -268,7 +287,7 @@ function pintarAsientos(sala, turno) {
     const x = 8 + t * 84;
     const y = 54 - Math.sin(t * Math.PI) * 16;
     const habla = Boolean(turno && turno.id === asiento.id);
-    const pide = habla || (sala.cola || []).some((persona) => persona.id === asiento.id);
+    const pide = (sala.cola || []).some((persona) => persona.id === asiento.id);
     const funcion = asiento.funcion || "";
     boton.className = "asiento"
       + (asiento.nombre ? "" : " is-libre")
@@ -394,15 +413,15 @@ function pintarReunion(sala) {
   if (cerrar) {
     cerrar.classList.toggle("is-pendiente", Boolean(state.cierrePendiente));
     cerrar.classList.toggle("is-cerrada", cerrada && !state.cierrePendiente);
+    cerrar.disabled = Boolean(state.cierrePendiente);
     if (state.cierrePendiente) {
       cerrar.textContent = "Cerrar reunión";
-      cerrar.disabled = true;
     } else if (cerrada) {
       cerrar.textContent = "Reunión cerrada";
-      cerrar.disabled = true;
+    } else if (activa) {
+      cerrar.textContent = "Cerrar reunión";
     } else {
       cerrar.textContent = "Cerrar reunión";
-      cerrar.disabled = !sala.organo;
     }
   }
 }
@@ -438,7 +457,7 @@ function pintarAgenda() {
     if (state.enMeet) {
       lead.textContent = "Estás en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet. La mesa, la palabra y el orden del día siguen acá.";
     } else if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
-      lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión: seguís en el aula, en la sala compartida.";
+      lead.textContent = "Esta dirección no junta a los demás. Entrá con el enlace del aula compartido.";
     } else if (!sala.adentro) {
       lead.textContent = "Escribí tu nombre y tu función, y tocá Entrar a la reunión. La cámara y el micrófono se prenden abajo, si los querés.";
     } else if (!sala.organo || sala.cerrada) {
@@ -788,8 +807,8 @@ async function alternarMicrofono() {
   if (mediosLosManejaMeet()) return;
   state.meFui = false;
   if (!state.sala) {
-    decir("Pegá el enlace y tocá Entrar a la reunión. El micrófono se enciende en esta aula.");
-    $("meet").focus();
+    decir("Abrí el aula con el enlace de la sala. El micrófono se prende acá.");
+    $("nombre").focus();
     return;
   }
   if (!state.room || !state.room.adentro) {
@@ -851,25 +870,86 @@ async function cargarArchivo(reintento) {
 }
 
 async function cerrarReunion() {
-  if (state.cierrePendiente || (state.room && state.room.cerrada)) return;
-  if (!state.room || !state.room.adentro) {
-    decir("Entrá con tu nombre y tu función para cerrar la reunión.");
+  if (state.cierrePendiente) return;
+  if (!state.room) {
+    decir("La sala todavía no cargó. Probá de nuevo.");
+    return;
+  }
+  if (!state.room.adentro) {
+    decir("Entrá con tu nombre y tu función para cerrar la reunión o descartar el borrador.");
     $("nombre").focus();
     return;
   }
-  if (!state.room.organo) {
-    decir("La reunión todavía no comenzó.");
+  const activa = Boolean(state.room.organo) && !state.room.cerrada;
+  if (state.room.cerrada) {
+    decir("La reunión ya está cerrada. Si querés otra, tocá Comenzar reunión.");
+    return;
+  }
+  if (!activa) {
+    const hay = (state.room.temas || []).length
+      || state.room.unidad
+      || state.room.acta
+      || ($("organo") && $("organo").value)
+      || ($("unidad") && $("unidad").value.trim())
+      || ($("acta") && $("acta").value.trim());
+    if (!hay) {
+      decir("No hay una reunión ni un borrador para cerrar.");
+      return;
+    }
+    const sigue = window.confirm("¿Descartar el borrador? Se borran los temas, el órgano, la unidad y el acta.");
+    if (!sigue) {
+      decir("El borrador sigue en el aula.");
+      return;
+    }
+    state.cierrePendiente = true;
+    pintarReunion(state.room);
+    state.room.temas = [];
+    state.room.tema = 0;
+    state.room.organo = "";
+    state.room.unidad = "";
+    state.room.acta = "";
+    state.room.organo_nombre = "";
+    if ($("organo")) $("organo").value = "";
+    if ($("unidad")) $("unidad").value = "";
+    if ($("acta")) $("acta").value = "";
+    state.anterior = { organo: "", unidad: "", acta: "" };
+    pintarSala();
+    const ok = await enviar("descartar");
+    state.cierrePendiente = false;
+    pintarReunion(state.room);
+    if (ok) {
+      avisoAgenda("Borrador descartado.", false);
+      decir("Borrador descartado. El orden del día quedó vacío.");
+    }
     return;
   }
   state.cierrePendiente = true;
+  state.room.cerrada = true;
   pintarReunion(state.room);
   const ok = await enviar("cerrar");
   state.cierrePendiente = false;
+  if (!ok) await cargarSala();
   pintarReunion(state.room);
   if (ok && state.room && state.room.cerrada) {
     avisoAgenda("Reunión cerrada.", false);
     decir("Reunión cerrada. Podés comenzar otra cuando quieras.");
   }
+}
+
+async function alternarMano() {
+  if (!sentado()) {
+    decir("Sentate para pedir la palabra.");
+    return;
+  }
+  const sala = state.room;
+  const yo = sala.sentado;
+  const pide = (sala.cola || []).some((persona) => persona.id === yo);
+  sala.cola = pide
+    ? sala.cola.filter((persona) => persona.id !== yo)
+    : (sala.cola || []).concat([{ id: yo, nombre: "" }]);
+  pintarSala();
+  const ok = await enviar("palabra");
+  if (!ok) await cargarSala();
 }
 
 async function agregarTema(event) {
@@ -940,63 +1020,6 @@ async function salirDelAula() {
   } finally {
     state.saliendo = false;
   }
-}
-
-function origenCompartido() {
-  if (state.room && (state.room.sync === "drive" || state.room.sync === "hoja")) return location.origin;
-  if (location.hostname === "consejo-investigacion.vercel.app") {
-    return "https://consejo-investigacion-uccuyo.vercel.app";
-  }
-  return location.origin;
-}
-
-async function abrirMeet(event) {
-  if (event) event.preventDefault();
-  if (state.enMeet) {
-    decir("Ya estás en Meet. El aula sigue en esta reunión.");
-    return;
-  }
-  const crudo = $("meet") ? $("meet").value.trim() : "";
-  let url = "";
-  if (crudo) {
-    try {
-      const data = await api("/api/aula/codigo?texto=" + encodeURIComponent(crudo));
-      url = data.meet_url || "";
-    } catch (err) {
-      decir(err.message);
-      return;
-    }
-  } else if (state.room && state.room.meet_url) {
-    url = state.room.meet_url;
-  }
-  if (!url) {
-    decir("Pegá un enlace de Meet para abrirlo en otra pestaña. El aula sigue acá.");
-    if ($("meet")) $("meet").focus();
-    return;
-  }
-  window.open(url, "_blank", "noopener");
-}
-
-async function salaDelEnlace() {
-  const crudo = $("meet") ? $("meet").value.trim() : "";
-  if (!crudo) {
-    if (!state.sala) {
-      decir("Pegá el enlace de Meet. Te quedás en el aula.");
-      if ($("meet")) $("meet").focus();
-      return "error";
-    }
-    return "misma";
-  }
-  let data;
-  try {
-    data = await api("/api/aula/codigo?texto=" + encodeURIComponent(crudo));
-  } catch (err) {
-    decir(err.message);
-    return "error";
-  }
-  if (state.sala && data.codigo === state.sala) return "misma";
-  location.href = origenCompartido() + "/aula?sala=" + encodeURIComponent(data.codigo);
-  return "navega";
 }
 
 async function estadoInicial(cliente) {
@@ -1138,11 +1161,11 @@ async function enviarCara() {
 async function entrar(event) {
   if (event && event.preventDefault) event.preventDefault();
   state.meFui = false;
-  if (!exigirIdentidad()) return;
-  if (!state.enMeet) {
-    const cambio = await salaDelEnlace();
-    if (cambio !== "misma") return;
+  if (!state.sala) {
+    decir("Abrí el aula con el enlace de la sala.");
+    return;
   }
+  if (!exigirIdentidad()) return;
   await enviar("perfil");
   if (state.room && state.room.adentro) {
     decir(state.enMeet
@@ -1232,7 +1255,7 @@ async function iniciar() {
   $("form-entrar").addEventListener("submit", entrar);
   $("btn-camara").addEventListener("click", () => alternarCamara());
   $("btn-pantalla").addEventListener("click", () => compartirPantalla());
-  $("btn-palabra").addEventListener("click", () => enviar("palabra"));
+  $("btn-palabra").addEventListener("click", () => alternarMano());
   $("btn-ceder").addEventListener("click", () => enviar("ceder"));
   $("btn-conceder").addEventListener("click", () => enviar("conceder"));
   $("btn-salir").addEventListener("click", () => enviar("salir"));
@@ -1244,8 +1267,6 @@ async function iniciar() {
   });
   $("form-reunion").addEventListener("submit", guardarReunion);
   $("form-tema").addEventListener("submit", agregarTema);
-  $("form-meet").addEventListener("submit", (event) => event.preventDefault());
-  $("abrir-meet").addEventListener("click", abrirMeet);
   $("btn-micro").addEventListener("click", encenderMicrofono);
   $("btn-dejar").addEventListener("click", () => salirDelAula());
   $("btn-copiar").addEventListener("click", () => copiarEnlace());
@@ -1256,7 +1277,7 @@ async function iniciar() {
   $("btn-cerrar").addEventListener("click", cerrarReunion);
 
   if (!state.sala) {
-    decir("Pegá el enlace de Meet y tocá Entrar a la reunión. Te quedás en el aula.");
+    decir("Abrí el aula con el enlace de la sala. Después escribí tu nombre y tu función, y tocá Entrar a la reunión.");
     return;
   }
 
