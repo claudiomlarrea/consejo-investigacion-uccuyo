@@ -28,9 +28,7 @@ img { display: block; }
 .barra {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "marca acciones"
-    "vivo acta";
+  grid-template-areas: "marca vivo";
   align-items: center;
   gap: 8px 16px;
   padding: 12px 20px;
@@ -41,9 +39,7 @@ img { display: block; }
   z-index: 5;
 }
 .marca { grid-area: marca; margin-right: 0; }
-.vivo { grid-area: vivo; }
-.acta { grid-area: acta; justify-self: end; }
-.barra-acciones { grid-area: acciones; justify-self: end; }
+.vivo { grid-area: vivo; justify-self: end; margin: 0; }
 .marca {
   display: flex;
   align-items: center;
@@ -197,6 +193,20 @@ img { display: block; }
   min-width: 180px;
 }
 .tema-nuevo input { flex: 1; min-width: 220px; }
+.archivo {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.archivo input {
+  display: block;
+  margin-top: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
 .mandos {
   margin: 8px 0 28px;
   padding: 12px 0 8px;

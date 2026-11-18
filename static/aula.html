@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=8">
+  <link rel="stylesheet" href="/static/aula.css?v=9">
 </head>
 <body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
@@ -19,27 +19,19 @@
       </span>
     </a>
     <p class="vivo" id="sync">Conectando la sala…</p>
-    <div class="barra-acciones">
-      <button type="button" class="btn btn-oro" id="btn-meet-abrir">Abrir Meet</button>
-      <button type="button" class="btn btn-fantasma" id="btn-copiar">Copiar enlace del aula</button>
-    </div>
   </header>
 
   <section class="guia" id="guia">
-    <h2>El enlace es el de Google Meet</h2>
-    <p class="guia-lead" id="guia-lead">El del calendario. Todos pegan ese mismo enlace acá y entran a la misma aula.</p>
+    <h2>Entrá a la reunión</h2>
+    <p class="guia-lead" id="guia-lead">Pegá el enlace de Meet del calendario y tocá Entrar a la reunión. El micrófono se enciende en esa llamada, abajo a la izquierda.</p>
     <form class="meet" id="form-meet">
       <label>
-        Enlace de Meet del calendario
+        Enlace de Meet
         <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
       </label>
-      <button type="submit" class="btn btn-oro" id="btn-entrar-aula">Entrar al aula</button>
+      <button type="submit" class="btn btn-oro" id="btn-entrar-aula">Entrar a la reunión</button>
+      <button type="button" class="btn btn-fantasma" id="btn-micro">Encender micrófono</button>
     </form>
-    <ol>
-      <li><strong>Entrar:</strong> pegá el enlace de Meet y tocá Entrar al aula. Si esta página ya tiene ese código, ya estás adentro.</li>
-      <li><strong>Comenzar:</strong> nombre, función, órgano, unidad y número de acta. Después, Comenzar reunión.</li>
-      <li><strong>Escuchar:</strong> Abrir Meet. Esta página muestra las caras, la función y la pantalla. Cualquiera puede compartir su pantalla.</li>
-    </ol>
     <div class="identidad">
       <label class="nombre">
         Tu nombre
@@ -102,7 +94,7 @@
         <img id="pantalla-remota" alt="Pantalla compartida" hidden>
       </div>
       <h1 id="agenda-titulo">Agregá los temas de esta reunión.</h1>
-      <p class="meta" id="agenda-meta">Cada unidad escribe su número de acta. Los temas no salen de otra planilla.</p>
+      <p class="meta" id="agenda-meta">Los temas se escriben acá o se cargan desde un Word o un PDF.</p>
       <div class="telon-nav">
         <button type="button" class="btn btn-fantasma" id="btn-anterior">Tema anterior</button>
         <button type="button" class="btn btn-oro" id="btn-siguiente">Tema siguiente</button>
@@ -110,6 +102,11 @@
       <form class="tema-nuevo" id="form-tema">
         <input id="tema-titulo" maxlength="180" placeholder="Agregar un tema al orden del día">
         <button type="submit" class="btn btn-fantasma">Agregar</button>
+        <label class="archivo">
+          Word o PDF con los temas
+          <input id="archivo-temas" type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+        </label>
+        <button type="button" class="btn btn-oro" id="btn-archivo">Cargar temas</button>
       </form>
       <ol class="lista" id="agenda-lista"></ol>
     </section>
@@ -137,6 +134,6 @@
   </main>
 
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=8"></script>
+  <script src="/static/aula.js?v=9"></script>
 </body>
 </html>

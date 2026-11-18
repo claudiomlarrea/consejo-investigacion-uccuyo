@@ -326,18 +326,18 @@ function pintarAgenda() {
     ? items[indice]
     : "Agregá los temas cuando la reunión haya comenzado.";
   $("agenda-meta").textContent = sala.organo
-    ? "La reunión ya comenzó. El número de acta es el de esta unidad."
-    : "Elegí el órgano, la unidad y el número de acta, y tocá Comenzar reunión.";
+    ? "Los temas se escriben acá o se cargan desde un Word o un PDF."
+    : "Elegí el órgano, la unidad y el número de acta, y tocá Comenzar reunión. Los temas se cargan desde un Word o un PDF.";
   const botonReunion = $("btn-reunion");
   if (botonReunion) botonReunion.textContent = sala.organo ? "Actualizar reunión" : "Comenzar reunión";
   const lead = $("guia-lead");
   if (lead) {
     if (sala.sync !== "drive" && location.hostname === "consejo-investigacion.vercel.app") {
-      lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar al aula para abrir la sala compartida de este mismo Meet.";
+      lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión para abrir la sala compartida de este mismo Meet.";
     } else if (!sala.organo) {
-      lead.textContent = "Ya entraste al aula de esta reunión. Para comenzarla, completá los datos y tocá Comenzar reunión. Para escuchar, abrí Meet.";
+      lead.textContent = "Ya estás en la reunión. Completá los datos y tocá Comenzar reunión. El micrófono se enciende en Meet, abajo a la izquierda.";
     } else {
-      lead.textContent = "La reunión comenzó. Los demás entran pegando el mismo enlace de Meet del calendario.";
+      lead.textContent = "La reunión comenzó. El micrófono se enciende en Meet, abajo a la izquierda. Los demás entran con el mismo enlace.";
     }
   }
   $("btn-anterior").disabled = !sala.conduzco || indice <= 0;
@@ -398,6 +398,52 @@ async function guardarReunion(event) {
   if (state.room && state.room.organo) decir("La reunión comenzó. Los demás entran pegando el mismo enlace de Meet.");
 }
 
+function encenderMicrofono() {
+  const url = urlMeet() || enlaceDelCampo();
+  if (!url) {
+    decir("Pegá el enlace de Meet y tocá Entrar a la reunión. El micrófono se enciende ahí, abajo a la izquierda.");
+    $("meet").focus();
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+  decir("Se abrió Meet. El micrófono se enciende abajo a la izquierda de esa ventana.");
+}
+
+function enlaceDelCampo() {
+  const crudo = ($("meet").value || "").trim();
+  const hallado = crudo.match(/[a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4}/i);
+  return hallado ? "https://meet.google.com/" + hallado[0].toLowerCase() : "";
+}
+
+async function cargarArchivo() {
+  const input = $("archivo-temas");
+  const archivo = input.files && input.files[0];
+  if (!archivo) {
+    decir("Elegí un Word (.docx) o un PDF con los temas.");
+    return;
+  }
+  if (!state.room || !state.room.adentro) {
+    decir("Entrá con tu nombre y tu función para cargar los temas.");
+    return;
+  }
+  const datos = new FormData();
+  datos.append("archivo", archivo);
+  datos.append("client", state.client);
+  if (state.room && state.room.rev != null) datos.append("rev", String(state.room.rev));
+  try {
+    state.room = await api("/api/aula/" + encodeURIComponent(state.sala) + "/temas", {
+      method: "POST",
+      body: datos,
+    });
+    input.value = "";
+    pintarSala();
+    const cantidad = (state.room.temas || []).length;
+    decir("Temas cargados. El orden del día tiene " + cantidad + ".");
+  } catch (err) {
+    decir(err.message);
+  }
+}
+
 async function agregarTema(event) {
   event.preventDefault();
   const titulo = $("tema-titulo").value.trim();
@@ -434,17 +480,23 @@ async function guardarMeet(event) {
     $("meet").focus();
     return;
   }
+  const ventana = window.open("about:blank", "_blank");
   let data;
   try {
     data = await api("/api/aula/codigo?texto=" + encodeURIComponent(crudo));
   } catch (err) {
+    if (ventana) ventana.close();
     decir(err.message);
     return;
   }
   const destino = origenCompartido() + "/aula?sala=" + encodeURIComponent(data.codigo);
   const misma = data.codigo === state.sala && origenCompartido() === location.origin;
+  const llamada = data.meet_url || ("https://meet.google.com/" + data.codigo);
+  if (ventana) ventana.location = llamada;
   if (misma) {
-    decir("Ya estás en el aula de esta reunión. Completá órgano, unidad y acta, y tocá Comenzar reunión. Para escuchar, abrí Meet.");
+    decir(ventana
+      ? "Ya estás en la reunión. El micrófono se enciende en Meet, abajo a la izquierda."
+      : "Ya estás en la reunión. Si no se abrió Meet, tocá Encender micrófono.");
     return;
   }
   location.href = destino;
@@ -661,39 +713,20 @@ async function iniciar() {
   $("form-reunion").addEventListener("submit", guardarReunion);
   $("form-tema").addEventListener("submit", agregarTema);
   $("form-meet").addEventListener("submit", guardarMeet);
-  $("btn-meet-abrir").addEventListener("click", () => {
-    const url = urlMeet();
-    if (!url) {
-      decir("Pegá primero el enlace de Meet del calendario.");
-      $("meet").focus();
-      return;
-    }
-    window.open(url, "_blank", "noopener");
-    decir("Se abrió la videollamada. El aula es esta página.");
-  });
-  $("btn-copiar").addEventListener("click", async () => {
-    if (!state.sala) {
-      decir("Primero entrá con el enlace de Meet.");
-      return;
-    }
-    const enlace = origenCompartido() + "/aula?sala=" + encodeURIComponent(state.sala);
-    try {
-      await navigator.clipboard.writeText(enlace);
-      decir("Enlace del aula copiado. Quien lo abra entra a esta misma reunión.");
-    } catch (_err) {
-      decir(enlace);
-    }
-  });
+  $("btn-micro").addEventListener("click", encenderMicrofono);
+  $("btn-archivo").addEventListener("click", cargarArchivo);
 
   if (!state.sala) {
-    decir("Pegá el enlace de Meet del calendario y tocá Entrar al aula.");
+    decir("Pegá el enlace de Meet del calendario y tocá Entrar a la reunión.");
     return;
   }
 
   await engancharMeet();
   await cargarSala();
   if (state.nombre && state.funcion) await enviar("perfil");
-  if (state.room && !state.room.organo) decir("Ya estás en el aula. Falta tocar Comenzar reunión.");
+  if (state.room && !state.room.organo) {
+    decir("Ya estás en la reunión. El micrófono se enciende en Meet, abajo a la izquierda. Falta tocar Comenzar reunión.");
+  }
   arrancarPoll();
   latido();
   document.addEventListener("visibilitychange", () => {

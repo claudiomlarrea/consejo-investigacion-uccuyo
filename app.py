@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -13,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -115,6 +117,7 @@ class AulaIn(BaseModel):
     titulo: str = ""
     camara: bool = False
     tema: Optional[int] = None
+    titulos: List[str] = Field(default_factory=list)
     rev: Optional[int] = None
 
 
@@ -293,6 +296,69 @@ def pagina_manifiesto(request: Request):
     return aula.manifest(_origen(request))
 
 
+_PREFIJO_TEMA = re.compile(
+    r"^(?:(?:tema|punto)\s+)?(?:\d{1,2}|[ivxlcdm]{1,6}|[a-z])[\.\)\-]\s+",
+    re.IGNORECASE,
+)
+_SALTO_TEMA = re.compile(
+    r"^(?:orden del d[ií]a|acta\b|fecha\b|p[aá]gina\b|page\b|universidad cat[oó]lica)\b",
+    re.IGNORECASE,
+)
+
+
+def temas_desde_texto(texto: str) -> List[str]:
+    partes = re.split(
+        r"\n+|(?<=\S)\s+(?=(?:tema|punto)\s+\d{1,2}[\.\)])|(?<=\S)\s+(?=\d{1,2}[\.\)])",
+        texto.replace("\r", "\n"),
+        flags=re.IGNORECASE,
+    )
+    vistos: List[str] = []
+    ya = set()
+    for parte in partes:
+        linea = " ".join(parte.split())
+        linea = _PREFIJO_TEMA.sub("", linea).strip(" .-–—")
+        clave = linea.casefold()
+        if len(linea) < 4 or _SALTO_TEMA.match(linea) or clave in ya:
+            continue
+        ya.add(clave)
+        vistos.append(linea[:180].rstrip())
+        if len(vistos) >= 40:
+            break
+    return vistos
+
+
+def temas_desde_archivo(nombre: str, contenido: bytes) -> List[str]:
+    bajo = (nombre or "").lower()
+    if bajo.endswith(".doc") and not bajo.endswith(".docx"):
+        raise ValueError("Guardá el Word como .docx o como PDF.")
+    if len(contenido) > 4_000_000:
+        raise ValueError("El archivo pesa más de 4 MB.")
+    if bajo.endswith(".docx"):
+        from docx import Document
+
+        documento = Document(BytesIO(contenido))
+        lineas = [parrafo.text for parrafo in documento.paragraphs]
+        for tabla in documento.tables:
+            for fila in tabla.rows:
+                celdas = [celda.text.strip() for celda in fila.cells if celda.text.strip()]
+                if celdas:
+                    lineas.append(celdas[0])
+        temas = temas_desde_texto("\n".join(lineas))
+    elif bajo.endswith(".pdf"):
+        from pypdf import PdfReader
+
+        lector = PdfReader(BytesIO(contenido))
+        if len(lector.pages) > 20:
+            raise ValueError("El PDF tiene más de 20 páginas.")
+        texto = "\n".join((pagina.extract_text() or "") for pagina in lector.pages)
+        temas = temas_desde_texto(texto)
+    else:
+        raise ValueError("Cargá un Word (.docx) o un PDF.")
+    if not temas:
+        raise ValueError("No encontré temas en ese archivo. Cada tema tiene que ir en un renglón.")
+    return temas
+
+
 @app.get("/api/aula/codigo")
 def api_aula_codigo(texto: str = ""):
     try:
@@ -324,6 +390,29 @@ def api_aula_post(codigo: str, body: AulaIn):
         raise HTTPException(400, str(exc))
     except Exception:
         raise HTTPException(503, "La sala no responde. Reintentá en unos segundos.")
+
+
+@app.post("/api/aula/{codigo}/temas")
+async def api_aula_temas(
+    codigo: str,
+    client: str = Form(""),
+    rev: str = Form(""),
+    archivo: UploadFile = File(...),
+):
+    if len(client) < 8:
+        raise HTTPException(400, "Entrá con tu nombre y tu función para cargar los temas.")
+    try:
+        titulos = temas_desde_archivo(archivo.filename or "", await archivo.read())
+        cuerpo = {"client": client, "accion": "cargar", "titulos": titulos}
+        if rev.strip():
+            cuerpo["rev"] = int(rev)
+        return aula.aplicar(codigo, cuerpo)
+    except aula.AulaError as exc:
+        raise HTTPException(exc.status, exc.mensaje)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(400, "No pude leer ese archivo. Usá un Word .docx o un PDF.")
 
 
 @app.post("/api/aula/{codigo}/pantalla")

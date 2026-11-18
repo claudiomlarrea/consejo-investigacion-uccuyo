@@ -548,6 +548,24 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         sala["temas"].append(titulo[:180].rstrip())
         return True
 
+    if accion == "cargar":
+        _exigir_adentro(sala, client)
+        titulos = body.get("titulos") or []
+        if not isinstance(titulos, list):
+            raise AulaError(400, "Ese archivo no tiene temas.")
+        agregados = 0
+        for titulo in titulos:
+            limpio = " ".join(str(titulo).split())
+            if not limpio:
+                continue
+            if len(sala["temas"]) >= 40:
+                break
+            sala["temas"].append(limpio[:180].rstrip())
+            agregados += 1
+        if not agregados:
+            raise AulaError(400, "Ese archivo no tiene temas para cargar.")
+        return True
+
     if accion == "quitar":
         _exigir_adentro(sala, client)
         try:
