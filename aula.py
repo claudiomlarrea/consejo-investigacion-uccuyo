@@ -51,7 +51,7 @@ ARCHIVO = "consejo-aula-salas.json"
 _CODIGO = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 _MEET = re.compile(r"^[a-z]{3,4}-[a-z]{3,4}-[a-z]{3,4}$")
 CUPO = 100
-PRESENCIA_SEG = 45
+PRESENCIA_SEG = 60
 _CACHE_S = 2.5
 _FLUSH_S = 8
 _FRAME_MAX = 180_000
@@ -124,6 +124,10 @@ class AulaError(Exception):
         super().__init__(mensaje)
         self.status = status
         self.mensaje = mensaje
+
+
+class _Conflicto(Exception):
+    """Otra escritura ganó: hay que releer y volver a aplicar."""
 
 
 def _ahora() -> str:
@@ -488,8 +492,9 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
                 return False
             _marcar(sala, client, nombre)
             return True
+        viejo = int((sala["presentes"].get(client) or {}).get("visto") or 0)
         sala["presentes"][client]["visto"] = _ahora_s()
-        return False
+        return _ahora_s() - viejo >= 20
 
     if accion in ("entrar", "perfil"):
         if isinstance(sala.get("salidas"), dict):
@@ -800,6 +805,14 @@ class _Almacen:
         self._cara_ids: Dict[str, str] = {}
         self._cara_subida: Dict[str, float] = {}
         self._degradado = False
+        self._marca = 0
+        self._marca_leida = "0"
+
+    def marca_leida(self) -> str:
+        return str(self._marca_leida)
+
+    def _notar_marca(self, valor: Any) -> None:
+        self._marca_leida = str(valor if valor is not None else "")
 
     def modo(self) -> str:
         self._elegir()
@@ -845,7 +858,7 @@ class _Almacen:
             self._lecturas.notify_all()
             return json.loads(json.dumps(data))
 
-    def escribir(self, data: Dict[str, Any]) -> str:
+    def escribir(self, data: Dict[str, Any], marca: Optional[str] = None) -> str:
         self._elegir()
         if len(data) > 40:
             orden = sorted(data.items(), key=lambda kv: (kv[1] or {}).get("actualizado") or "")
@@ -854,9 +867,11 @@ class _Almacen:
             ultimo = None
             for _ in range(2):
                 try:
-                    self._escribir_drive(data)
+                    self._escribir_drive(data, marca)
                     ultimo = None
                     break
+                except _Conflicto:
+                    raise
                 except Exception as exc:
                     ultimo = exc
                     time.sleep(0.3)
@@ -874,7 +889,7 @@ class _Almacen:
                     self._cache = data
                 raise AulaError(503, "No pude guardar la sala. La reunión sigue en pie: reintentá.")
         else:
-            self._escribir_archivo(data)
+            self._escribir_archivo(data, marca)
         with self._lecturas:
             self._cache = data
             self._cache_at = time.time()
@@ -915,8 +930,8 @@ class _Almacen:
             sala["actualizado"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
             data[codigo] = sala
         try:
-            self.escribir(data)
-        except AulaError:
+            self.escribir(data, self.marca_leida())
+        except (AulaError, _Conflicto):
             for codigo, vistos in pendientes.items():
                 self._pulsos.setdefault(codigo, {}).update(vistos)
             return
@@ -1191,6 +1206,7 @@ class _Almacen:
 
     def _leer_archivo(self) -> Dict[str, Any]:
         path = self._ruta()
+        self._notar_marca(self._marca)
         if not path.is_file():
             return {}
         try:
@@ -1199,9 +1215,13 @@ class _Almacen:
             return {}
         return data if isinstance(data, dict) else {}
 
-    def _escribir_archivo(self, data: Dict[str, Any]) -> None:
+    def _escribir_archivo(self, data: Dict[str, Any], marca: Optional[str]) -> None:
+        if marca is not None and str(marca) != str(self._marca):
+            raise _Conflicto()
         path = self._ruta()
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._marca += 1
+        self._notar_marca(self._marca)
 
     def _buscar_o_crear(self) -> str:
         q = quote("name = '{}' and trashed = false".format(ARCHIVO))
@@ -1237,22 +1257,30 @@ class _Almacen:
         )
         if respuesta.status_code == 404:
             self._file_id = self._buscar_o_crear()
+            self._notar_marca("")
             return {}
         respuesta.raise_for_status()
+        self._notar_marca(respuesta.headers.get("ETag") or respuesta.headers.get("etag") or "")
         if not respuesta.text.strip():
             return {}
         data = respuesta.json()
         return data if isinstance(data, dict) else {}
 
-    def _escribir_drive(self, data: Dict[str, Any]) -> None:
+    def _escribir_drive(self, data: Dict[str, Any], marca: Optional[str]) -> None:
         assert self._file_id
+        headers = {"Content-Type": "application/json"}
+        if marca:
+            headers["If-Match"] = marca
         respuesta = self._session.patch(
             "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=media".format(self._file_id),
             data=json.dumps(data, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=8,
         )
+        if respuesta.status_code in (409, 412, 429, 500, 503):
+            raise _Conflicto()
         respuesta.raise_for_status()
+        self._notar_marca(respuesta.headers.get("ETag") or respuesta.headers.get("etag") or "")
 
 
 _ALMACEN = _Almacen()
@@ -1316,6 +1344,83 @@ def _limpiar_sesion_previa(sala: Dict[str, Any]) -> None:
         sala["voces"] = {}
 
 
+def _persona_mas_nueva(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(a, dict) or not a:
+        return dict(b or {})
+    if not isinstance(b, dict) or not b:
+        return dict(a)
+    if int(b.get("visto") or 0) >= int(a.get("visto") or 0):
+        ganadora, otra = dict(b), a
+    else:
+        ganadora, otra = dict(a), b
+    if not ganadora.get("nombre") and otra.get("nombre"):
+        ganadora["nombre"] = otra.get("nombre")
+    if not ganadora.get("funcion") and otra.get("funcion"):
+        ganadora["funcion"] = otra.get("funcion")
+    if otra.get("camara"):
+        ganadora["camara"] = True
+    return ganadora
+
+
+def _fusionar_personas(
+    original: Dict[str, Any], editada: Dict[str, Any], fresca: Dict[str, Any]
+) -> Dict[str, Any]:
+    resultado = {k: dict(v) for k, v in (fresca or {}).items() if isinstance(v, dict)}
+    original = original or {}
+    editada = editada or {}
+    for cid, persona in editada.items():
+        if isinstance(persona, dict):
+            resultado[cid] = _persona_mas_nueva(resultado.get(cid), persona)
+    for cid, previa in original.items():
+        if cid in editada or not isinstance(previa, dict):
+            continue
+        fresco = (fresca or {}).get(cid)
+        if not isinstance(fresco, dict) or int(fresco.get("visto") or 0) <= int(previa.get("visto") or 0):
+            resultado.pop(cid, None)
+        else:
+            resultado[cid] = dict(fresco)
+    return resultado
+
+
+def _fusionar_sala(original: Dict[str, Any], editada: Dict[str, Any], fresca: Dict[str, Any]) -> Dict[str, Any]:
+    """Conserva a quien entró en paralelo y aplica el cambio de esta petición."""
+    if not isinstance(fresca, dict):
+        return editada
+    out = json.loads(json.dumps(fresca))
+    orig = original if isinstance(original, dict) else {}
+    _asegurar_forma(out)
+    _asegurar_forma(editada)
+    if orig:
+        _asegurar_forma(orig)
+    out["presentes"] = _fusionar_personas(
+        orig.get("presentes") or {}, editada.get("presentes") or {}, fresca.get("presentes") or {}
+    )
+    out["ocupantes"] = _fusionar_personas(
+        orig.get("ocupantes") or {}, editada.get("ocupantes") or {}, fresca.get("ocupantes") or {}
+    )
+    for campo in ("organo", "unidad", "acta", "cerrada", "tema", "meet"):
+        if orig.get(campo) != editada.get(campo):
+            out[campo] = editada.get(campo)
+    if list(orig.get("temas") or []) != list(editada.get("temas") or []):
+        out["temas"] = list(editada.get("temas") or [])
+        out["tema"] = editada.get("tema") or 0
+    if orig.get("turno") != editada.get("turno") or list(orig.get("cola") or []) != list(editada.get("cola") or []):
+        out["turno"] = editada.get("turno")
+        out["cola"] = list(editada.get("cola") or [])
+    if orig.get("pantalla") != editada.get("pantalla"):
+        out["pantalla"] = editada.get("pantalla")
+    voces = dict(fresca.get("voces") or {}) if isinstance(fresca.get("voces"), dict) else {}
+    if isinstance(editada.get("voces"), dict):
+        voces.update(editada.get("voces") or {})
+        for cid in (orig.get("voces") or {}) if isinstance(orig.get("voces"), dict) else {}:
+            if cid not in editada.get("voces"):
+                voces.pop(cid, None)
+        out["voces"] = voces
+    out["rev"] = max(int(fresca.get("rev") or 0), int(editada.get("rev") or 0))
+    out["actualizado"] = editada.get("actualizado") or fresca.get("actualizado") or _ahora()
+    return out
+
+
 def _sala(data: Dict[str, Any], codigo: str, acta: Optional[str] = None) -> Tuple[Dict[str, Any], bool]:
     sala = data.get(codigo)
     if not isinstance(sala, dict) or "ocupantes" not in sala:
@@ -1343,9 +1448,10 @@ def obtener(codigo: str, acta: Optional[str] = None, client: str = "", ingreso: 
     if creada or ingreso:
         with _WRITE:
             data = _ALMACEN.leer(forzar=True)
+            marca = _ALMACEN.marca_leida()
             sala, creada = _sala(data, codigo, acta)
             if creada:
-                modo = _ALMACEN.escribir(data)
+                modo = _ALMACEN.escribir(data, marca)
             else:
                 antes = json.dumps(
                     {
@@ -1380,7 +1486,12 @@ def obtener(codigo: str, acta: Optional[str] = None, client: str = "", ingreso: 
                     sala["rev"] = int(sala.get("rev") or 0) + 1
                     sala["actualizado"] = _ahora()
                     data[codigo] = sala
-                    modo = _ALMACEN.escribir(data)
+                    try:
+                        modo = _ALMACEN.escribir(data, marca)
+                    except _Conflicto:
+                        data = _ALMACEN.leer(forzar=True)
+                        sala, _creada = _sala(data, codigo, acta)
+                        modo = _ALMACEN.modo()
                 else:
                     modo = _ALMACEN.modo()
     else:
@@ -1391,39 +1502,56 @@ def obtener(codigo: str, acta: Optional[str] = None, client: str = "", ingreso: 
 def aplicar(codigo: str, body: Dict[str, Any]) -> Dict[str, Any]:
     codigo = normalizar_codigo(codigo)
     accion = str(body.get("accion") or "")
-    with _WRITE:
-        if accion == "pulso":
-            data = _ALMACEN.leer()
-            sala, _creada = _sala(data, codigo, None)
+    for intento in range(5):
+        choco = False
+        with _WRITE:
+            try:
+                data = _ALMACEN.leer(forzar=True)
+            except AulaError:
+                raise
+            except Exception:
+                data = {}
+            marca = _ALMACEN.marca_leida()
+            sala, creada = _sala(data, codigo, None)
+            original = json.loads(json.dumps(sala))
             visible = _aplicar(sala, body)
             client = str(body.get("client") or "")
-            if client in (sala.get("presentes") or {}):
+            if accion == "pulso" and client in (sala.get("presentes") or {}):
                 _ALMACEN.anotar_pulso(codigo, client, int(sala["presentes"][client].get("visto") or _ahora_s()))
-            if visible:
-                sala["rev"] = int(sala.get("rev") or 0) + 1
-                sala["actualizado"] = _ahora()
-                data[codigo] = sala
-                modo = _ALMACEN.escribir(data)
-            else:
+            if not visible and not creada:
                 with _ALMACEN._lecturas:
                     if isinstance(_ALMACEN._cache, dict):
                         _ALMACEN._cache[codigo] = sala
-                modo = _ALMACEN.modo()
-            _ALMACEN.flush_pulsos()
-            return _vista(codigo, sala, client, modo)
-        data = _ALMACEN.leer(forzar=True)
-        sala, _creada = _sala(data, codigo, None)
-        visible = _aplicar(sala, body)
-        if visible:
+                if accion == "pulso":
+                    _ALMACEN.flush_pulsos()
+                return _vista(codigo, sala, client, _ALMACEN.modo())
             sala["rev"] = int(sala.get("rev") or 0) + 1
             sala["actualizado"] = _ahora()
-        data[codigo] = sala
-        modo = _ALMACEN.escribir(data) if visible or _creada else _ALMACEN.modo()
-        if not visible and not _creada:
-            with _ALMACEN._lecturas:
-                if isinstance(_ALMACEN._cache, dict):
-                    _ALMACEN._cache[codigo] = sala
-        return _vista(codigo, sala, str(body.get("client") or ""), modo)
+            try:
+                fresco = _ALMACEN.leer(forzar=True)
+                marca = _ALMACEN.marca_leida()
+            except Exception:
+                fresco = data
+            sala_fresca = fresco.get(codigo) if isinstance(fresco.get(codigo), dict) else None
+            if sala_fresca and sala_fresca.get("actualizado") != original.get("actualizado"):
+                sala = _fusionar_sala(original, sala, sala_fresca)
+                sala["rev"] = int(sala.get("rev") or 0) + 1
+                sala["actualizado"] = _ahora()
+            else:
+                fresco = data
+            fresco[codigo] = sala
+            try:
+                modo = _ALMACEN.escribir(fresco, marca)
+            except _Conflicto:
+                choco = True
+            else:
+                if accion == "pulso":
+                    _ALMACEN.flush_pulsos()
+                return _vista(codigo, sala, client, modo)
+        if choco:
+            time.sleep(0.05 * (intento + 1))
+            continue
+    raise AulaError(503, "No pude guardar la sala. La reunión sigue en pie: reintentá.")
 
 
 def guardar_pantalla(codigo: str, client: str, blob: bytes) -> None:

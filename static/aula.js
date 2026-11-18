@@ -141,10 +141,13 @@ async function enviar(accion, extra, reintento) {
     pintarSala();
     return true;
   } catch (err) {
-    if (!reintento && err.message && err.message.indexOf("Reintentá") !== -1) {
-      await cargarSala();
-      return enviar(accion, extra, true);
+    const intento = reintento || 0;
+    const sePuedeReintentar = err.message && /reintent/i.test(err.message);
+    if (sePuedeReintentar && intento < 3) {
+      await new Promise((resolver) => setTimeout(resolver, 200 * (intento + 1)));
+      return enviar(accion, extra, intento + 1);
     }
+    if (accion === "pulso" || senalSilenciosa) return false;
     if (err.message && err.message.indexOf("llena") !== -1) state.lleno = true;
     if (!senalSilenciosa) decir(err.message);
     if (esAgenda(accion)) avisoAgenda(err.message, true);
