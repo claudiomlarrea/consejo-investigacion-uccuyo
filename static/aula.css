@@ -147,6 +147,20 @@ img { display: block; }
 }
 .guia h2 { margin: 0 0 8px; font-size: 1.05rem; }
 .guia-lead { margin: 0 0 12px; color: #f8e7a8; }
+.nota-meet {
+  margin: 0 0 10px;
+  color: #f8e7a8;
+  font-weight: 700;
+}
+.nota-barra-meet {
+  margin: 0;
+  align-self: center;
+  max-width: 180px;
+  color: var(--gold-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
 .sin-sala main, .sin-sala .guia ol, .sin-sala .identidad, .sin-sala .mi-camara { display: none; }
 .guia ol { margin: 0; padding-left: 1.2rem; color: #f8e7a8; }
 .guia li { margin: 6px 0; }
@@ -409,6 +423,10 @@ img { display: block; }
 .cola, .estado { grid-column: 1 / -1; margin: 0; }
 .cola { color: var(--gold-2); min-height: 1.2em; }
 .estado { color: var(--muted); min-height: 1.2em; }
+.meet[hidden],
+.llamada[hidden],
+.nota-meet[hidden],
+.nota-barra-meet[hidden] { display: none !important; }
 .meet {
   grid-column: 1 / -1;
   display: flex;
@@ -429,6 +447,25 @@ img { display: block; }
 .pasos ol { padding-left: 1.1rem; }
 .pasos li { margin: 6px 0; }
 .panel .estado { margin-top: 10px; }
+.panel .controles { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.panel .controles[hidden] { display: none; }
+.panel .controles .nombre,
+.panel .controles select,
+.panel .controles input { width: 100%; min-width: 0; }
+.panel .controles select {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.panel .controles form { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.panel .tema-nuevo { margin: 0; }
+.panel .panel-tema { margin: 8px 0 0; font-weight: 800; line-height: 1.25; }
+.panel .lista { max-height: 180px; }
+.panel .lista button { text-transform: none; letter-spacing: 0; font-weight: 650; }
 
 body:not(.panel) { padding-bottom: 118px; }
 .barra-llamada {

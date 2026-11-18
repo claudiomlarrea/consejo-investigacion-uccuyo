@@ -24,6 +24,14 @@ class AgendaTests(unittest.TestCase):
     def setUp(self):
         _local()
 
+    def test_manifest_abre_el_escenario(self):
+        origen = "https://consejo-investigacion-uccuyo.vercel.app"
+        web = aula.manifest(origen)["addOns"]["meet"]["web"]
+        self.assertEqual(web["sidePanelUrl"], origen + "/aula/panel")
+        self.assertEqual(web["mainStageUrl"], origen + "/aula")
+        self.assertEqual(web["addOnOrigins"], [origen])
+        self.assertTrue(web["supportsScreenSharing"])
+
     def test_word_oficial_del_consejo(self):
         data = construir_od(196, [{
             "tipo": "Proyecto de Investigación",

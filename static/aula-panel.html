@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=13">
+  <link rel="stylesheet" href="/static/aula.css?v=14">
 </head>
 <body class="panel" data-meet-project="__MEET_PROJECT__">
   <header class="panel-marca">
@@ -17,18 +17,80 @@
       <small>UCCuyo · cualquier unidad</small>
     </div>
   </header>
-  <p class="panel-texto">El micrófono se enciende en el aula. Cada persona pone su nombre y su función, se ve la cara y cualquiera puede compartir la pantalla.</p>
+  <p class="panel-texto" id="panel-texto">El micrófono se enciende en el aula. Cada persona pone su nombre y su función, se ve la cara y cualquiera puede compartir la pantalla.</p>
+  <p class="nota-meet" id="nota-meet" hidden>El audio, la cámara, la pantalla y el chat los maneja Meet. El aula queda en esta reunión, en el escenario.</p>
   <button type="button" class="btn btn-oro btn-bloque" id="abrir">Abrir el aula</button>
+  <button type="button" class="btn btn-oro btn-bloque" id="escenario" hidden>Mostrar el aula a todos</button>
   <p class="estado" id="estado" role="status"></p>
-  <details class="pasos" open>
+
+  <section class="controles" id="controles" hidden>
+    <label class="nombre">
+      Tu nombre
+      <input id="p-nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
+    </label>
+    <label class="nombre">
+      Tu función
+      <input id="p-funcion" maxlength="60" placeholder="Secretario de Investigación">
+    </label>
+    <button type="button" class="btn btn-oro btn-bloque" id="p-entrar">Entrar al aula</button>
+
+    <form id="p-reunion">
+      <label class="nombre">
+        Órgano
+        <select id="p-organo">
+          <option value="">Elegí el órgano</option>
+          <option value="consejo-superior">Consejo Superior</option>
+          <option value="consejo-directivo">Consejo Directivo</option>
+          <option value="consejo-departamento">Consejo de Departamento</option>
+          <option value="consejo-investigacion">Consejo de Investigación</option>
+          <option value="consejo-extension">Consejo de Extensión</option>
+          <option value="facultad">Facultad</option>
+          <option value="escuela">Escuela</option>
+          <option value="departamento">Departamento</option>
+          <option value="secretaria">Secretaría</option>
+          <option value="otro">Otra unidad</option>
+        </select>
+      </label>
+      <label class="nombre">
+        Unidad
+        <input id="p-unidad" maxlength="80" placeholder="Facultad, escuela, departamento">
+      </label>
+      <label class="nombre">
+        N.º de acta
+        <input id="p-acta" maxlength="24" placeholder="El de esta unidad">
+      </label>
+      <button type="submit" class="btn btn-oro btn-bloque" id="p-comenzar">Comenzar reunión</button>
+    </form>
+
+    <p class="panel-tema" id="p-tema">Agregá los temas del orden del día.</p>
+    <ol class="lista" id="p-lista"></ol>
+    <form id="p-tema-form" class="tema-nuevo">
+      <input id="p-titulo" maxlength="180" placeholder="Agregar un tema">
+      <button type="submit" class="btn btn-fantasma">Agregar</button>
+      <label class="archivo">
+        Word o PDF
+        <input id="p-archivo" type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+      </label>
+      <button type="button" class="btn btn-oro" id="p-cargar">Cargar temas</button>
+    </form>
+    <p class="aviso-tema" id="p-aviso" role="status"></p>
+    <div class="dock-acciones">
+      <button type="button" class="btn btn-oro" id="p-palabra">Pedir la palabra</button>
+      <button type="button" class="btn btn-fantasma" id="p-conceder">Dar la palabra</button>
+      <button type="button" class="btn btn-fantasma" id="p-ceder">Cedo la palabra</button>
+    </div>
+  </section>
+
+  <details class="pasos" id="pasos" open>
     <summary>Cómo entrar</summary>
-    <ol>
+    <ol id="pasos-lista">
       <li>Abrí el aula y escribí tu nombre y tu función.</li>
       <li>Elegí el órgano, la unidad y el número de acta de esa reunión.</li>
       <li>El micrófono se enciende en el aula, sin salir de esa página.</li>
       <li>Copiá el enlace del aula y pegalo en el chat de Meet.</li>
     </ol>
   </details>
-  <script src="/static/aula-panel.js?v=5"></script>
+  <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
+  <script src="/static/aula-panel.js?v=6"></script>
 </body>
 </html>

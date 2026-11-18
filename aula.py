@@ -1387,6 +1387,7 @@ def manifest(origen: str) -> Dict[str, Any]:
             "meet": {
                 "web": {
                     "sidePanelUrl": origen.rstrip("/") + "/aula/panel",
+                    "mainStageUrl": origen.rstrip("/") + "/aula",
                     "supportsScreenSharing": True,
                     "addOnOrigins": [origen.rstrip("/")],
                     "logoUrl": logo,

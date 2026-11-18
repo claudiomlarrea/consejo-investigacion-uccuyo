@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=13">
+  <link rel="stylesheet" href="/static/aula.css?v=14">
 </head>
 <body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
@@ -26,6 +26,7 @@
 
   <section class="guia" id="guia">
     <h2>Entrá a la reunión</h2>
+    <p class="nota-meet" id="nota-meet" hidden>Estás en el escenario de Meet. El audio, la cámara, la pantalla y el chat los maneja Meet. Nadie sale de esta reunión.</p>
     <p class="guia-lead" id="guia-lead">Pegá el enlace de Meet del calendario y tocá Entrar a la reunión. Te quedás en esta aula. El micrófono se enciende acá.</p>
     <form class="meet" id="form-meet">
       <label>
@@ -136,6 +137,7 @@
   </main>
 
   <nav class="barra-llamada" aria-label="Controles de la llamada">
+    <p class="nota-barra-meet" id="nota-barra-meet" hidden>Audio, cámara y pantalla: Meet</p>
     <button type="button" class="llamada is-off" id="btn-micro" aria-pressed="false" aria-label="Micrófono apagado">
       <span class="llamada-icono" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="22" height="22"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6 11a6 6 0 0 0 12 0"></path><path d="M12 17v3"></path></svg>
@@ -166,6 +168,6 @@
   <p class="toast" id="toast" role="status" hidden></p>
 
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=13"></script>
+  <script src="/static/aula.js?v=14"></script>
 </body>
 </html>

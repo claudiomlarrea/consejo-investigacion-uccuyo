@@ -19,6 +19,7 @@ const state = {
   lleno: false,
   meFui: false,
   cargandoTemas: false,
+  enMeet: false,
 };
 
 if (!state.client) {
@@ -392,7 +393,9 @@ function pintarAgenda() {
   if (botonCerrar) botonCerrar.textContent = sala.cerrada ? "Reabrir reunión" : "Cerrar reunión";
   const lead = $("guia-lead");
   if (lead) {
-    if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
+    if (state.enMeet) {
+      lead.textContent = "Estás en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet. La mesa, la palabra y el orden del día siguen acá.";
+    } else if (sala.sync !== "drive" && sala.sync !== "hoja" && location.hostname === "consejo-investigacion.vercel.app") {
       lead.textContent = "Esta dirección no junta a los demás. Tocá Entrar a la reunión: seguís en el aula, en la sala compartida.";
     } else if (!sala.organo) {
       lead.textContent = "Ya estás en la reunión, en esta aula. Completá los datos y tocá Comenzar reunión. El micrófono se enciende acá.";
@@ -688,6 +691,33 @@ function conectarVoces() {
   });
 }
 
+function mediosLosManejaMeet() {
+  if (!state.enMeet) return false;
+  decir("El audio, la cámara y la pantalla los maneja Meet. Seguís en el aula.");
+  return true;
+}
+
+function aplicarModoMeet() {
+  state.enMeet = true;
+  document.body.classList.add("en-meet");
+  const nota = $("nota-meet");
+  if (nota) nota.hidden = false;
+  const form = $("form-meet");
+  if (form) form.hidden = true;
+  const guia = document.querySelector("#guia h2");
+  if (guia) guia.textContent = "Tu lugar en el aula";
+  ["btn-micro", "btn-camara", "btn-pantalla", "btn-dejar"].forEach((id) => {
+    const boton = $(id);
+    if (boton) boton.hidden = true;
+  });
+  const avisoBarra = $("nota-barra-meet");
+  if (avisoBarra) avisoBarra.hidden = false;
+  const marca = document.querySelector(".marca");
+  if (marca) {
+    marca.addEventListener("click", (event) => event.preventDefault());
+  }
+}
+
 async function alternarMicrofono() {
   if (microLocal) {
     microLocal.getTracks().forEach((pista) => pista.stop());
@@ -702,6 +732,7 @@ async function alternarMicrofono() {
     decir("Micrófono apagado. Seguís en el aula.");
     return;
   }
+  if (mediosLosManejaMeet()) return;
   state.meFui = false;
   if (!state.sala) {
     decir("Pegá el enlace y tocá Entrar a la reunión. El micrófono se enciende en esta aula.");
@@ -859,6 +890,10 @@ function origenCompartido() {
 
 async function guardarMeet(event) {
   event.preventDefault();
+  if (state.enMeet) {
+    decir("Ya estás en Meet. El aula sigue en esta reunión.");
+    return;
+  }
   const crudo = $("meet").value.trim();
   if (!crudo) {
     decir("Pegá el enlace de Meet del calendario.");
@@ -881,22 +916,50 @@ async function guardarMeet(event) {
   location.href = destino;
 }
 
-async function engancharMeet() {
-  if (window.parent === window) return;
-  const project = cuerpo.dataset.meetProject;
-  if (!project || !window.meet || !window.meet.addon) return;
+async function estadoInicial(cliente) {
   try {
-    const session = await window.meet.addon.createAddonSession({ cloudProjectNumber: String(project) });
+    const estado = await cliente.getActivityStartingState();
+    return estado || null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function engancharMeet() {
+  if (window.parent === window) return false;
+  const project = cuerpo.dataset.meetProject;
+  if (!project || !window.meet || !window.meet.addon) return false;
+  try {
+    const session = await window.meet.addon.createAddonSession({
+      cloudProjectNumber: String(project),
+    });
     const main = await session.createMainStageClient();
-    const info = await main.getMeetingInfo();
-    const codigo = info && info.meetingCode ? String(info.meetingCode).toLowerCase() : "";
+    aplicarModoMeet();
+    let codigo = "";
+    try {
+      const info = await main.getMeetingInfo();
+      codigo = info && info.meetingCode ? String(info.meetingCode).toLowerCase() : "";
+    } catch (_err) {
+      codigo = "";
+    }
+    try {
+      const inicial = await estadoInicial(main);
+      if (inicial && inicial.additionalData) {
+        const extra = JSON.parse(inicial.additionalData);
+        if (extra && extra.sala) codigo = String(extra.sala).toLowerCase();
+      }
+    } catch (_err) {
+      /* el código de la reunión alcanza */
+    }
     if (codigo && codigo !== state.sala) {
       const url = new URL(location.href);
       url.searchParams.set("sala", codigo);
-      location.replace(url.href);
+      location.replace(url.pathname + url.search);
+      return true;
     }
+    return false;
   } catch (_err) {
-    decir("Meet no abrió la sesión del complemento. El aula sigue en esta página.");
+    return false;
   }
 }
 
@@ -923,6 +986,7 @@ function latido() {
 }
 
 async function prenderCamara() {
+  if (state.enMeet) return false;
   if (state.camara) return true;
   try {
     state.camara = await navigator.mediaDevices.getUserMedia({
@@ -991,6 +1055,13 @@ async function enviarCara() {
 async function entrar() {
   state.meFui = false;
   if (!exigirIdentidad()) return;
+  if (state.enMeet) {
+    await enviar("perfil");
+    if (state.room && state.room.adentro) {
+      decir("Entraste al aula. El audio, la cámara y la pantalla los maneja Meet.");
+    }
+    return;
+  }
   const camara = prenderCamara();
   await enviar("perfil");
   const videoOk = await camara;
@@ -1008,6 +1079,7 @@ async function alternarCamara() {
     await apagarCamara();
     return;
   }
+  if (mediosLosManejaMeet()) return;
   state.meFui = false;
   if (!exigirIdentidad()) return;
   if (!(await prenderCamara())) return;
@@ -1021,6 +1093,7 @@ async function compartirPantalla() {
     await dejarPantalla(true);
     return;
   }
+  if (mediosLosManejaMeet()) return;
   state.meFui = false;
   if (!exigirIdentidad()) return;
   let stream;
@@ -1109,10 +1182,13 @@ async function iniciar() {
     return;
   }
 
-  await engancharMeet();
+  const recarga = await engancharMeet();
+  if (recarga) return;
   await cargarSala();
   if (state.nombre && state.funcion) await enviar("perfil");
-  if (state.room && !state.room.organo) {
+  if (state.enMeet) {
+    decir("El aula está en el escenario de Meet. El audio, la cámara y la pantalla los maneja Meet.");
+  } else if (state.room && !state.room.organo) {
     decir("Ya estás en la reunión, en esta aula. El micrófono se enciende acá. Falta tocar Comenzar reunión.");
   }
   arrancarPoll();
