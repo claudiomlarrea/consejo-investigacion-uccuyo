@@ -106,8 +106,14 @@ class AulaIn(BaseModel):
     client: str = Field(min_length=8, max_length=80)
     accion: str
     nombre: str = ""
+    funcion: str = ""
     asiento: Optional[int] = None
-    acta: Optional[int] = None
+    acta: str = ""
+    organo: str = ""
+    unidad: str = ""
+    meet: str = ""
+    titulo: str = ""
+    camara: bool = False
     tema: Optional[int] = None
     rev: Optional[int] = None
 
@@ -255,10 +261,9 @@ def _resumen_acta(numero: int) -> Dict[str, Any]:
 
 def _html_aula(nombre: str) -> HTMLResponse:
     html = (STATIC / nombre).read_text(encoding="utf-8")
-    numero = aula.sugerir_acta()
     html = (
-        html.replace("__ACTA__", str(numero))
-        .replace("__SALA__", "consejo-{}".format(numero))
+        html.replace("__ACTA__", "")
+        .replace("__SALA__", "")
         .replace("__MEET_PROJECT__", os.environ.get("MEET_CLOUD_PROJECT_NUMBER", ""))
     )
     return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
@@ -298,9 +303,9 @@ def api_aula_codigo(texto: str = ""):
 
 
 @app.get("/api/aula/{codigo}")
-def api_aula_get(codigo: str, acta: Optional[int] = None, client: str = ""):
+def api_aula_get(codigo: str, acta: str = "", client: str = ""):
     try:
-        return aula.obtener(codigo, acta, client)
+        return aula.obtener(codigo, acta or None, client)
     except aula.AulaError as exc:
         raise HTTPException(exc.status, exc.mensaje)
     except ValueError as exc:
@@ -349,6 +354,39 @@ def api_aula_pantalla_ver(codigo: str):
         content=imagen,
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=1, s-maxage=1, stale-while-revalidate=3"},
+    )
+
+
+@app.post("/api/aula/{codigo}/cara")
+async def api_aula_cara(codigo: str, request: Request, client: str = ""):
+    cuerpo = await request.body()
+    try:
+        aula.guardar_cara(codigo, client, cuerpo)
+    except aula.AulaError as exc:
+        raise HTTPException(exc.status, exc.mensaje)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(503, "No pude publicar la cámara.")
+    return Response(status_code=204)
+
+
+@app.get("/api/aula/{codigo}/cara")
+def api_aula_cara_ver(codigo: str, client: str = ""):
+    try:
+        imagen = aula.leer_cara(codigo, client)
+    except aula.AulaError as exc:
+        raise HTTPException(exc.status, exc.mensaje)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(503, "La cámara no está disponible.")
+    if not imagen:
+        raise HTTPException(404, "Esa cámara no está encendida.")
+    return Response(
+        content=imagen,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=2, s-maxage=2, stale-while-revalidate=4"},
     )
 
 

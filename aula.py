@@ -32,11 +32,18 @@ _MESES = {
     "diciembre": 12,
 }
 
-# Arco de izquierda a derecha: consejeros, presidencia, secretaría, consejeros.
-VISUAL = [2, 3, 4, 5, 0, 1, 6, 7, 8, 9]
-ROLES = {
-    0: ("presidencia", "Presidencia"),
-    1: ("secretaria", "Secretaría"),
+# Diez lugares, sin cargo fijo: la función la escribe quien se sienta.
+VISUAL = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+ORGANOS = {
+    "consejo-superior": "Consejo Superior",
+    "consejo-directivo": "Consejo Directivo",
+    "consejo-departamento": "Consejo de Departamento",
+    "consejo-investigacion": "Consejo de Investigación",
+    "facultad": "Facultad",
+    "escuela": "Escuela",
+    "departamento": "Departamento",
+    "secretaria": "Secretaría",
+    "otro": "Otra unidad",
 }
 ARCHIVO = "consejo-aula-salas.json"
 _CODIGO = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
@@ -46,6 +53,8 @@ PRESENCIA_SEG = 90
 _CACHE_S = 2.5
 _FLUSH_S = 8
 _FRAME_MAX = 180_000
+_CARA_MAX = 48_000
+_CARAS = 24
 _WRITE = threading.Lock()
 
 
@@ -99,18 +108,20 @@ def _ahora() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def _nueva(acta: int) -> Dict[str, Any]:
-    if acta not in ACTAS:
-        acta = sugerir_acta()
+def _nueva() -> Dict[str, Any]:
     return {
         "rev": 0,
-        "acta": acta,
+        "organo": "",
+        "unidad": "",
+        "acta": "",
+        "temas": [],
         "tema": 0,
         "turno": None,
         "cola": [],
         "ocupantes": {},
         "presentes": {},
         "pantalla": None,
+        "meet": "",
         "actualizado": _ahora(),
     }
 
@@ -122,14 +133,8 @@ def _asiento_de(sala: Dict[str, Any], client: str) -> Optional[int]:
     return None
 
 
-def _hay_mesa(sala: Dict[str, Any]) -> bool:
-    return "0" in sala["ocupantes"] or "1" in sala["ocupantes"]
-
-
-def _conduce(sala: Dict[str, Any], client: str) -> bool:
-    if not _hay_mesa(sala):
-        return True
-    return _asiento_de(sala, client) in (0, 1)
+def _adentro(sala: Dict[str, Any], client: str) -> bool:
+    return bool(client) and client in _vivos(sala)
 
 
 def _nombre(sala: Dict[str, Any], asiento: Optional[int]) -> Optional[str]:
@@ -148,10 +153,50 @@ def _quitar_de_cola(sala: Dict[str, Any], asiento: int) -> None:
 def _limpiar_nombre(nombre: str) -> str:
     limpio = " ".join((nombre or "").split())
     if not limpio:
-        raise AulaError(400, "Escribí tu nombre para sentarte.")
+        raise AulaError(400, "Escribí tu nombre.")
     if len(limpio) > 40:
         limpio = limpio[:40].rstrip()
     return limpio
+
+
+def _limpiar_funcion(funcion: str) -> str:
+    limpio = " ".join((funcion or "").split())
+    if not limpio:
+        raise AulaError(400, "Escribí tu función. Por ejemplo: Secretario de Investigación.")
+    if len(limpio) > 60:
+        limpio = limpio[:60].rstrip()
+    return limpio
+
+
+def _limpiar_acta(valor: str) -> str:
+    limpio = " ".join(str(valor or "").split())
+    limpio = re.sub(r"(?i)^acta\s*", "", limpio).strip()
+    if not limpio or len(limpio) > 24:
+        raise AulaError(400, "Escribí el número de acta de tu unidad.")
+    return limpio
+
+
+def _limpiar_unidad(valor: str) -> str:
+    limpio = " ".join(str(valor or "").split())
+    if not limpio:
+        raise AulaError(400, "Escribí la unidad: facultad, escuela, departamento o secretaría.")
+    if len(limpio) > 80:
+        limpio = limpio[:80].rstrip()
+    return limpio
+
+
+def codigo_meet(raw: str) -> str:
+    texto = (raw or "").strip()
+    if not texto:
+        return ""
+    bajo = texto.lower()
+    marca = "meet.google.com/"
+    if marca in bajo:
+        texto = texto[bajo.index(marca) + len(marca) :]
+    texto = texto.split("?")[0].split("#")[0].strip("/").split("/")[0].strip().lower()
+    if not _MEET.fullmatch(texto):
+        raise AulaError(400, "Pegá un enlace de Meet, como https://meet.google.com/abc-defg-hij.")
+    return texto
 
 
 def _ahora_s() -> int:
@@ -161,13 +206,27 @@ def _ahora_s() -> int:
 def _asegurar_forma(sala: Dict[str, Any]) -> None:
     sala.setdefault("presentes", {})
     sala.setdefault("pantalla", None)
+    sala.setdefault("organo", "")
+    sala.setdefault("unidad", "")
+    sala.setdefault("temas", [])
+    sala.setdefault("meet", "")
+    if isinstance(sala.get("acta"), int):
+        sala["acta"] = str(sala["acta"])
+    sala.setdefault("acta", "")
+    sala["acta"] = str(sala.get("acta") or "")
+    if not isinstance(sala.get("temas"), list):
+        sala["temas"] = []
     if sala["presentes"]:
         return
     ahora = _ahora_s()
     for ocupante in sala.get("ocupantes", {}).values():
         cid = str(ocupante.get("client") or "")
         if cid:
-            sala["presentes"][cid] = {"nombre": ocupante.get("nombre") or "", "visto": ahora}
+            sala["presentes"][cid] = {
+                "nombre": ocupante.get("nombre") or "",
+                "funcion": ocupante.get("funcion") or "",
+                "visto": ahora,
+            }
 
 
 def _vivos(sala: Dict[str, Any], ahora: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
@@ -196,31 +255,61 @@ def _purgar(sala: Dict[str, Any]) -> None:
         sala["pantalla"] = None
 
 
-def _marcar(sala: Dict[str, Any], client: str, nombre: str) -> None:
+def _rotulo(ocupante: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not ocupante:
+        return None
+    nombre = ocupante.get("nombre") or ""
+    funcion = ocupante.get("funcion") or ""
+    if nombre and funcion:
+        return nombre + " · " + funcion
+    return nombre or funcion or None
+
+
+def _reflejar(sala: Dict[str, Any], client: str) -> None:
+    persona = sala["presentes"].get(client) or {}
+    for ocupante in sala["ocupantes"].values():
+        if ocupante.get("client") == client:
+            ocupante["nombre"] = persona.get("nombre") or ocupante.get("nombre") or ""
+            ocupante["funcion"] = persona.get("funcion") or ""
+
+
+def _marcar(sala: Dict[str, Any], client: str, nombre: str, funcion: str = "") -> None:
     _purgar(sala)
     persona = sala["presentes"].get(client)
     if persona is None:
         if len(sala["presentes"]) >= CUPO:
             raise AulaError(403, "La sala está llena (100 personas).")
-        persona = {"nombre": nombre, "visto": _ahora_s()}
+        persona = {"nombre": nombre, "funcion": funcion, "visto": _ahora_s(), "camara": False}
         sala["presentes"][client] = persona
     persona["visto"] = _ahora_s()
     if nombre:
         persona["nombre"] = nombre
+    if funcion:
+        persona["funcion"] = funcion
+    persona.setdefault("camara", False)
+    persona.setdefault("funcion", "")
+
+
+def _exigir_adentro(sala: Dict[str, Any], client: str) -> None:
+    if not _adentro(sala, client):
+        raise AulaError(403, "Entrá con tu nombre y tu función para armar la reunión.")
 
 
 def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[str, Any]:
+    _asegurar_forma(sala)
     mio = _asiento_de(sala, client)
     asientos = []
     for n in VISUAL:
-        rol, etiqueta = ROLES.get(n, ("consejero", "Consejero"))
         ocupante = sala["ocupantes"].get(str(n))
+        cid = str(ocupante.get("client") or "") if ocupante else ""
+        cara = bool(cid and (sala["presentes"].get(cid) or {}).get("camara"))
         asientos.append(
             {
                 "id": n,
-                "rol": rol,
-                "etiqueta": etiqueta,
                 "nombre": ocupante.get("nombre") if ocupante else None,
+                "funcion": (ocupante.get("funcion") or "") if ocupante else "",
+                "cara": cara,
+                "quien": cid if cara else "",
                 "propio": mio == n,
             }
         )
@@ -228,10 +317,21 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
     vivos = _vivos(sala)
     roster = []
     for cid, persona in sorted(vivos.items(), key=lambda kv: (kv[1].get("nombre") or "").casefold()):
-        roster.append({"nombre": persona.get("nombre") or "Sin nombre", "propio": cid == client})
+        roster.append(
+            {
+                "nombre": persona.get("nombre") or "Sin nombre",
+                "funcion": persona.get("funcion") or "",
+                "cara": bool(persona.get("camara")),
+                "quien": cid if persona.get("camara") else "",
+                "propio": cid == client,
+            }
+        )
     pantalla = sala.get("pantalla") or None
     if pantalla and str(pantalla.get("client") or "") not in vivos:
         pantalla = None
+    yo = vivos.get(client) or {}
+    meet = str(sala.get("meet") or "")
+    temas = [str(t) for t in sala.get("temas") or [] if str(t).strip()]
     return {
         "codigo": codigo,
         "rev": sala["rev"],
@@ -240,18 +340,26 @@ def _vista(codigo: str, sala: Dict[str, Any], client: str, sync: str) -> Dict[st
         "presentes": len(vivos),
         "adentro": client in vivos,
         "roster": roster,
-        "meet_url": enlace_meet(codigo),
-        "acta": sala["acta"],
-        "mes": ACTAS.get(sala["acta"]),
-        "fecha": FECHAS.get(sala["acta"]),
+        "meet": meet,
+        "meet_url": enlace_meet(meet) or enlace_meet(codigo),
+        "organo": sala.get("organo") or "",
+        "organo_nombre": ORGANOS.get(sala.get("organo") or "", ""),
+        "unidad": sala.get("unidad") or "",
+        "acta": str(sala.get("acta") or ""),
+        "temas": temas,
         "tema": sala["tema"],
         "turno": None
         if turno is None
-        else {"id": turno, "nombre": _nombre(sala, turno)},
-        "cola": [{"id": n, "nombre": _nombre(sala, n)} for n in sala["cola"]],
+        else {"id": turno, "nombre": _rotulo(sala["ocupantes"].get(str(turno)))},
+        "cola": [{"id": n, "nombre": _rotulo(sala["ocupantes"].get(str(n)))} for n in sala["cola"]],
         "asientos": asientos,
-        "conduzco": _conduce(sala, client) if client else not _hay_mesa(sala),
+        "conduzco": client in vivos,
         "sentado": mio,
+        "yo": {
+            "nombre": yo.get("nombre") or "",
+            "funcion": yo.get("funcion") or "",
+            "cara": bool(yo.get("camara")),
+        },
         "pantalla": None
         if not pantalla
         else {
@@ -274,9 +382,9 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
     client = _cliente(body)
     accion = str(body.get("accion") or "")
     _asegurar_forma(sala)
-    if accion not in ("pulso", "entrar", "pantalla", "cortar"):
+    if accion not in ("pulso", "entrar", "perfil", "pantalla", "cortar", "camara"):
         if body.get("rev") is not None and int(body["rev"]) != sala["rev"]:
-            raise AulaError(409, "Otro consejero acaba de actualizar la sala.")
+            raise AulaError(409, "Otra persona acaba de actualizar la sala. Reintentá.")
 
     if accion == "pulso":
         if client not in _vivos(sala):
@@ -288,19 +396,32 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         sala["presentes"][client]["visto"] = _ahora_s()
         return False
 
-    if accion == "entrar":
-        _marcar(sala, client, _limpiar_nombre(str(body.get("nombre") or "")))
-        return True
+    if accion in ("entrar", "perfil"):
+        nombre = _limpiar_nombre(str(body.get("nombre") or ""))
+        funcion = _limpiar_funcion(str(body.get("funcion") or ""))
+        previo = sala["presentes"].get(client)
+        igual = bool(
+            previo
+            and client in _vivos(sala)
+            and previo.get("nombre") == nombre
+            and (previo.get("funcion") or "") == funcion
+        )
+        _marcar(sala, client, nombre, funcion)
+        _reflejar(sala, client)
+        return not igual
 
     if accion == "sentarse":
         nombre = _limpiar_nombre(str(body.get("nombre") or ""))
+        funcion = _limpiar_funcion(
+            str(body.get("funcion") or (sala["presentes"].get(client) or {}).get("funcion") or "")
+        )
         try:
             asiento = int(body.get("asiento"))
         except (TypeError, ValueError):
             raise AulaError(400, "Elegí un asiento.")
         if asiento not in VISUAL:
             raise AulaError(400, "Ese asiento no existe.")
-        _marcar(sala, client, nombre)
+        _marcar(sala, client, nombre, funcion)
         actual = sala["ocupantes"].get(str(asiento))
         if actual and actual.get("client") != client:
             raise AulaError(409, "Ese asiento acaba de ocuparse.")
@@ -310,7 +431,12 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
             _quitar_de_cola(sala, previo)
             if sala.get("turno") == previo:
                 sala["turno"] = None
-        sala["ocupantes"][str(asiento)] = {"nombre": nombre, "client": client, "visto": _ahora_s()}
+        sala["ocupantes"][str(asiento)] = {
+            "nombre": nombre,
+            "funcion": funcion,
+            "client": client,
+            "visto": _ahora_s(),
+        }
         return True
 
     if accion == "salir":
@@ -325,10 +451,33 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
                 sala["turno"] = sala["cola"].pop(0)
         return True
 
+    if accion == "camara":
+        if client not in _vivos(sala):
+            _marcar(
+                sala,
+                client,
+                _limpiar_nombre(str(body.get("nombre") or "")),
+                _limpiar_funcion(str(body.get("funcion") or "")),
+            )
+        prendida = bool(body.get("camara"))
+        if prendida:
+            encendidas = sum(1 for p in _vivos(sala).values() if p.get("camara"))
+            ya = bool((sala["presentes"].get(client) or {}).get("camara"))
+            if not ya and encendidas >= _CARAS:
+                raise AulaError(403, "Hay demasiadas cámaras encendidas. Podés seguir y compartir la pantalla.")
+        sala["presentes"][client]["camara"] = prendida
+        sala["presentes"][client]["visto"] = _ahora_s()
+        return True
+
     if accion == "pantalla":
         if client not in _vivos(sala):
-            _marcar(sala, client, _limpiar_nombre(str(body.get("nombre") or "")))
-        nombre = (sala["presentes"].get(client) or {}).get("nombre") or _limpiar_nombre(str(body.get("nombre") or ""))
+            _marcar(
+                sala,
+                client,
+                _limpiar_nombre(str(body.get("nombre") or "")),
+                _limpiar_funcion(str(body.get("funcion") or "")),
+            )
+        nombre = (sala["presentes"].get(client) or {}).get("nombre") or ""
         sala["pantalla"] = {"client": client, "nombre": nombre, "visto": _ahora_s()}
         sala["presentes"][client]["visto"] = _ahora_s()
         return True
@@ -346,15 +495,14 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
             raise AulaError(403, "Sentate para pedir la palabra.")
         if sala.get("turno") == asiento or asiento in sala["cola"]:
             return False
-        if not _hay_mesa(sala) and sala.get("turno") is None:
+        if sala.get("turno") is None:
             sala["turno"] = asiento
             return True
         sala["cola"].append(asiento)
         return True
 
     if accion == "conceder":
-        if not _conduce(sala, client):
-            raise AulaError(403, "La presidencia o la secretaría dan la palabra.")
+        _exigir_adentro(sala, client)
         try:
             asiento = int(body.get("asiento"))
         except (TypeError, ValueError):
@@ -369,33 +517,56 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
 
     if accion == "ceder":
         asiento = _asiento_de(sala, client)
-        if sala.get("turno") != asiento and not _conduce(sala, client):
-            raise AulaError(403, "Solo quien habla, o la mesa, puede cerrar el turno.")
+        if sala.get("turno") != asiento and not _adentro(sala, client):
+            raise AulaError(403, "Entrá a la reunión para cerrar el turno.")
         sala["turno"] = sala["cola"].pop(0) if sala["cola"] else None
         return True
 
-    if accion == "acta":
-        if not _conduce(sala, client):
-            raise AulaError(403, "La mesa conduce el orden del día.")
+    if accion == "reunion":
+        _exigir_adentro(sala, client)
+        organo = str(body.get("organo") or "").strip()
+        if organo not in ORGANOS:
+            raise AulaError(400, "Elegí el órgano: Consejo Superior, directivo, departamento, facultad, escuela o secretaría.")
+        sala["organo"] = organo
+        sala["unidad"] = _limpiar_unidad(str(body.get("unidad") or ""))
+        sala["acta"] = _limpiar_acta(str(body.get("acta") or ""))
+        return True
+
+    if accion == "meet":
+        _exigir_adentro(sala, client)
+        sala["meet"] = codigo_meet(str(body.get("meet") or ""))
+        return True
+
+    if accion == "agregar":
+        _exigir_adentro(sala, client)
+        titulo = " ".join(str(body.get("titulo") or "").split())
+        if not titulo:
+            raise AulaError(400, "Escribí el tema.")
+        if len(sala["temas"]) >= 40:
+            raise AulaError(400, "El orden del día ya tiene 40 temas.")
+        sala["temas"].append(titulo[:180].rstrip())
+        return True
+
+    if accion == "quitar":
+        _exigir_adentro(sala, client)
         try:
-            acta = int(body.get("acta"))
+            indice = int(body.get("tema"))
         except (TypeError, ValueError):
-            raise AulaError(400, "Elegí un acta.")
-        if acta not in ACTAS:
-            raise AulaError(400, "Esa acta no existe.")
-        if acta != sala["acta"]:
-            sala["acta"] = acta
-            sala["tema"] = 0
+            raise AulaError(400, "Elegí un tema.")
+        if indice < 0 or indice >= len(sala["temas"]):
+            raise AulaError(400, "Ese tema no está en el orden del día.")
+        sala["temas"].pop(indice)
+        if sala["tema"] >= len(sala["temas"]):
+            sala["tema"] = max(0, len(sala["temas"]) - 1)
         return True
 
     if accion == "ir":
-        if not _conduce(sala, client):
-            raise AulaError(403, "La mesa conduce el orden del día.")
+        _exigir_adentro(sala, client)
         try:
             tema = int(body.get("tema"))
         except (TypeError, ValueError):
             raise AulaError(400, "Elegí un tema.")
-        if tema < 0 or tema > 200:
+        if not sala["temas"] or tema < 0 or tema >= len(sala["temas"]):
             raise AulaError(400, "Ese tema no está en el orden del día.")
         sala["tema"] = tema
         return True
@@ -417,6 +588,9 @@ class _Almacen:
         self._ultimo_flush = 0.0
         self._frames: Dict[str, Tuple[bytes, float, str]] = {}
         self._frame_ids: Dict[str, str] = {}
+        self._caras: Dict[str, Tuple[bytes, float]] = {}
+        self._cara_ids: Dict[str, str] = {}
+        self._cara_subida: Dict[str, float] = {}
         self._degradado = False
 
     def modo(self) -> str:
@@ -573,6 +747,87 @@ class _Almacen:
         except Exception:
             return memoria[0] if memoria else None
 
+    def guardar_cara(self, codigo: str, client: str, blob: bytes) -> None:
+        if not blob.startswith(b"\xff\xd8") or len(blob) > _CARA_MAX:
+            raise AulaError(400, "La cámara tiene que ser una imagen chica.")
+        clave = codigo + "|" + client
+        self._caras[clave] = (blob, time.time())
+        self._elegir()
+        if self._modo != "drive":
+            return
+        if time.time() - self._cara_subida.get(clave, 0) < 4:
+            return
+        self._cara_subida[clave] = time.time()
+        try:
+            fid = self._cara_ids.get(clave) or self._cara_id(codigo, client)
+            self._cara_ids[clave] = fid
+            respuesta = self._session.patch(
+                "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=media".format(fid),
+                data=blob,
+                headers={"Content-Type": "image/jpeg"},
+                timeout=6,
+            )
+            respuesta.raise_for_status()
+        except Exception:
+            return
+
+    def leer_cara(self, codigo: str, client: str) -> Optional[bytes]:
+        clave = codigo + "|" + client
+        memoria = self._caras.get(clave)
+        if memoria and time.time() - memoria[1] < 8:
+            return memoria[0]
+        self._elegir()
+        if self._modo != "drive":
+            return memoria[0] if memoria else None
+        try:
+            fid = self._cara_ids.get(clave) or self._buscar_cara(codigo, client)
+            if not fid:
+                return memoria[0] if memoria else None
+            self._cara_ids[clave] = fid
+            respuesta = self._session.get(
+                "https://www.googleapis.com/drive/v3/files/{}?alt=media".format(fid),
+                timeout=6,
+            )
+            if respuesta.status_code != 200 or not respuesta.content:
+                return memoria[0] if memoria else None
+            self._caras[clave] = (respuesta.content, time.time())
+            return respuesta.content
+        except Exception:
+            return memoria[0] if memoria else None
+
+    def _cara_id(self, codigo: str, client: str) -> str:
+        encontrado = self._buscar_cara(codigo, client)
+        if encontrado:
+            return encontrado
+        nombre = "consejo-aula-cara-{}-{}.jpg".format(codigo, client)
+        boundary = "cara" + uuid.uuid4().hex
+        meta = json.dumps({"name": nombre, "mimeType": "image/jpeg"})
+        cuerpo = (
+            "--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n"
+            "--{b}\r\nContent-Type: image/jpeg\r\n\r\n"
+        ).format(b=boundary, meta=meta).encode("utf-8") + b"\xff\xd8\xff\xd9" + "\r\n--{}--\r\n".format(boundary).encode("utf-8")
+        creado = self._session.post(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+            data=cuerpo,
+            headers={"Content-Type": "multipart/related; boundary=" + boundary},
+            timeout=6,
+        )
+        creado.raise_for_status()
+        return creado.json()["id"]
+
+    def _buscar_cara(self, codigo: str, client: str) -> Optional[str]:
+        nombre = "consejo-aula-cara-{}-{}.jpg".format(codigo, client)
+        q = quote("name = '{}' and trashed = false".format(nombre))
+        respuesta = self._session.get(
+            "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id)&pageSize=1".format(q),
+            timeout=6,
+        )
+        respuesta.raise_for_status()
+        archivos = respuesta.json().get("files") or []
+        if archivos:
+            return archivos[0]["id"]
+        return None
+
     def _frame_id(self, codigo: str) -> str:
         encontrado = self._buscar_frame(codigo)
         if encontrado:
@@ -718,17 +973,22 @@ def _sesion_drive():
         return None
 
 
-def _sala(data: Dict[str, Any], codigo: str, acta: Optional[int]) -> Tuple[Dict[str, Any], bool]:
+def _sala(data: Dict[str, Any], codigo: str, acta: Optional[str] = None) -> Tuple[Dict[str, Any], bool]:
     sala = data.get(codigo)
     if not isinstance(sala, dict) or "ocupantes" not in sala:
-        sala = _nueva(acta or sugerir_acta())
+        sala = _nueva()
+        if acta:
+            try:
+                sala["acta"] = _limpiar_acta(str(acta))
+            except AulaError:
+                pass
         data[codigo] = sala
         return sala, True
     _asegurar_forma(sala)
     return sala, False
 
 
-def obtener(codigo: str, acta: Optional[int] = None, client: str = "") -> Dict[str, Any]:
+def obtener(codigo: str, acta: Optional[str] = None, client: str = "") -> Dict[str, Any]:
     codigo = normalizar_codigo(codigo)
     try:
         data = _ALMACEN.leer()
@@ -808,11 +1068,39 @@ def leer_pantalla(codigo: str) -> Optional[bytes]:
     return _ALMACEN.leer_frame(codigo)
 
 
+def _persona_con_camara(codigo: str, client: str) -> bool:
+    if len(client) < 8 or len(client) > 80:
+        raise AulaError(400, "Falta la identificación de este navegador.")
+    data = _ALMACEN.leer()
+    sala = data.get(codigo) if isinstance(data.get(codigo), dict) else None
+    persona = ((sala or {}).get("presentes") or {}).get(client) or {}
+    if persona.get("camara"):
+        return True
+    data = _ALMACEN.leer(forzar=True)
+    sala = data.get(codigo) if isinstance(data.get(codigo), dict) else None
+    persona = ((sala or {}).get("presentes") or {}).get(client) or {}
+    return bool(persona.get("camara"))
+
+
+def guardar_cara(codigo: str, client: str, blob: bytes) -> None:
+    codigo = normalizar_codigo(codigo)
+    if not _persona_con_camara(codigo, client):
+        raise AulaError(403, "Prendé tu cámara antes de enviar la imagen.")
+    _ALMACEN.guardar_cara(codigo, client, blob)
+
+
+def leer_cara(codigo: str, client: str) -> Optional[bytes]:
+    codigo = normalizar_codigo(codigo)
+    if len(client) < 8 or len(client) > 80:
+        raise AulaError(400, "Falta la identificación de este navegador.")
+    return _ALMACEN.leer_cara(codigo, client)
+
+
 def manifest(origen: str) -> Dict[str, Any]:
     logo = origen.rstrip("/") + "/static/logo-uccuyo.png"
     return {
         "addOns": {
-            "common": {"name": "Aula del Consejo", "logoUrl": logo},
+            "common": {"name": "Aula UCCuyo", "logoUrl": logo},
             "meet": {
                 "web": {
                     "sidePanelUrl": origen.rstrip("/") + "/aula/panel",

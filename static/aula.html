@@ -3,29 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Aula del Consejo · UCCuyo</title>
+  <title>Aula de reuniones · UCCuyo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=3">
+  <link rel="stylesheet" href="/static/aula.css?v=6">
 </head>
-<body
-  data-acta="__ACTA__"
-  data-sala="__SALA__"
-  data-meet-project="__MEET_PROJECT__"
->
+<body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
     <a class="marca" href="/">
       <img src="/static/logo-uccuyo.png" width="42" height="42" alt="Universidad Católica de Cuyo">
       <span>
-        <strong>Aula del Consejo</strong>
-        <small>Investigación · UCCuyo</small>
+        <strong>Aula de reuniones</strong>
+        <small>UCCuyo · todas las unidades</small>
       </span>
     </a>
-    <label class="acta">
-      Acta
-      <select id="acta"></select>
-    </label>
     <p class="vivo" id="sync">Conectando la sala…</p>
     <div class="barra-acciones">
       <button type="button" class="btn btn-oro" id="btn-meet-abrir">Abrir Meet</button>
@@ -33,15 +25,66 @@
     </div>
   </header>
 
-  <p class="banner" id="banner">
-    <span>Hasta 100 personas en la misma sala. Cualquiera puede compartir su pantalla. Meet sigue con la cámara, el micrófono y el audio.</span>
-    <button type="button" id="cerrar-banner" aria-label="Cerrar aviso">×</button>
-  </p>
+  <section class="guia" id="guia">
+    <h2>Cómo se usa</h2>
+    <ol>
+      <li><strong>Primero entrá acá.</strong> Escribí tu nombre y tu función, por ejemplo Secretario de Investigación. Con ese clic se prende la cámara y tu cara queda en la sala.</li>
+      <li><strong>El audio se escucha en Meet.</strong> Si ya tenés la llamada, pegá el enlace al final de esta página. Si todavía no, abrí Meet y, cuando te dé el enlace, pegalo acá.</li>
+      <li><strong>Los demás entran con el enlace del aula</strong>, no alcanza con el de Meet. Copialo y pegalo en el chat. Cualquiera que entre puede compartir su pantalla.</li>
+    </ol>
+    <div class="identidad">
+      <label class="nombre">
+        Tu nombre
+        <input id="nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
+      </label>
+      <label class="nombre">
+        Tu función
+        <input id="funcion" maxlength="60" placeholder="Secretario de Investigación">
+      </label>
+      <div class="dock-acciones">
+        <button type="button" class="btn btn-oro" id="btn-entrar">Entrar y prender mi cámara</button>
+        <button type="button" class="btn btn-fantasma" id="btn-camara">Prender mi cámara</button>
+        <button type="button" class="btn btn-oro" id="btn-pantalla">Compartir pantalla</button>
+      </div>
+    </div>
+    <div class="mi-camara" id="mi-camara">
+      <div id="mi-camara-video">
+        <video id="mi-cara" autoplay playsinline muted hidden></video>
+      </div>
+      <p id="mi-cara-ayuda">Tu cara va a aparecer acá en cuanto entres.</p>
+    </div>
+  </section>
 
   <main>
     <section class="telon" aria-live="polite">
+      <form class="reunion" id="form-reunion">
+        <label>
+          Órgano
+          <select id="organo">
+            <option value="">Elegí el órgano</option>
+            <option value="consejo-superior">Consejo Superior</option>
+            <option value="consejo-directivo">Consejo Directivo</option>
+            <option value="consejo-departamento">Consejo de Departamento</option>
+            <option value="consejo-investigacion">Consejo de Investigación</option>
+            <option value="facultad">Facultad</option>
+            <option value="escuela">Escuela</option>
+            <option value="departamento">Departamento</option>
+            <option value="secretaria">Secretaría</option>
+            <option value="otro">Otra unidad</option>
+          </select>
+        </label>
+        <label>
+          Unidad
+          <input id="unidad" maxlength="80" placeholder="Facultad, escuela, departamento o secretaría">
+        </label>
+        <label>
+          N.º de acta
+          <input id="acta" maxlength="24" placeholder="El de esta unidad">
+        </label>
+        <button type="submit" class="btn btn-fantasma">Guardar reunión</button>
+      </form>
       <div class="telon-cabeza">
-        <p class="kicker" id="agenda-kicker">Orden del día</p>
+        <p class="kicker" id="agenda-kicker">Reunión</p>
         <p class="palabra" id="palabra">Nadie tiene la palabra</p>
       </div>
       <div id="pantalla-caja" class="pantalla" hidden>
@@ -49,50 +92,49 @@
         <video id="pantalla-local" autoplay playsinline muted hidden></video>
         <img id="pantalla-remota" alt="Pantalla compartida" hidden>
       </div>
-      <h1 id="agenda-titulo">Cargando el acta…</h1>
-      <p class="meta" id="agenda-meta"></p>
+      <h1 id="agenda-titulo">Agregá los temas de esta reunión.</h1>
+      <p class="meta" id="agenda-meta">Cada unidad escribe su número de acta. Los temas no salen de otra planilla.</p>
       <div class="telon-nav">
         <button type="button" class="btn btn-fantasma" id="btn-anterior">Tema anterior</button>
         <button type="button" class="btn btn-oro" id="btn-siguiente">Tema siguiente</button>
       </div>
+      <form class="tema-nuevo" id="form-tema">
+        <input id="tema-titulo" maxlength="180" placeholder="Agregar un tema al orden del día">
+        <button type="submit" class="btn btn-fantasma">Agregar</button>
+      </form>
       <ol class="lista" id="agenda-lista"></ol>
     </section>
 
-    <section class="camara" aria-label="Hemiciclo del consejo">
+    <section class="camara" aria-label="Mesa de la reunión">
       <div class="piso" aria-hidden="true"></div>
       <div class="mesa" aria-hidden="true"></div>
       <div id="asientos"></div>
     </section>
+
+    <section class="mandos">
+      <div class="dock-acciones">
+        <button type="button" class="btn btn-oro" id="btn-palabra">Pedir la palabra</button>
+        <button type="button" class="btn btn-fantasma" id="btn-conceder">Dar la palabra</button>
+        <button type="button" class="btn btn-fantasma" id="btn-ceder">Cedo la palabra</button>
+        <button type="button" class="btn btn-texto" id="btn-salir">Levantarme</button>
+      </div>
+      <p class="cola" id="cola"></p>
+      <details class="roster">
+        <summary id="roster-cuenta">En la sala</summary>
+        <p id="roster-lista"></p>
+      </details>
+      <form class="meet" id="form-meet">
+        <label>
+          Si ya tenés Meet, pegá el enlace
+          <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
+        </label>
+        <button type="submit" class="btn btn-fantasma">Guardar enlace de Meet</button>
+      </form>
+      <p class="estado" id="estado" role="status"></p>
+    </section>
   </main>
 
-  <footer class="dock">
-    <label class="nombre">
-      Tu nombre
-      <input id="nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
-    </label>
-    <div class="dock-acciones">
-      <button type="button" class="btn btn-oro" id="btn-pantalla">Compartir pantalla</button>
-      <button type="button" class="btn btn-oro" id="btn-palabra">Pedir la palabra</button>
-      <button type="button" class="btn btn-fantasma" id="btn-conceder">Dar la palabra</button>
-      <button type="button" class="btn btn-fantasma" id="btn-ceder">Cedo la palabra</button>
-      <button type="button" class="btn btn-texto" id="btn-salir">Levantarme</button>
-    </div>
-    <p class="cola" id="cola"></p>
-    <details class="roster">
-      <summary id="roster-cuenta">En la sala</summary>
-      <p id="roster-lista"></p>
-    </details>
-    <form class="meet" id="form-meet">
-      <label>
-        Enlace de Google Meet
-        <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
-      </label>
-      <button type="submit" class="btn btn-fantasma">Unir esta reunión</button>
-    </form>
-    <p class="estado" id="estado" role="status"></p>
-  </footer>
-
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=3"></script>
+  <script src="/static/aula.js?v=6"></script>
 </body>
 </html>
