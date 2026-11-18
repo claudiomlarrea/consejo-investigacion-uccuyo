@@ -327,6 +327,84 @@ class AgendaTests(unittest.TestCase):
         self.assertEqual(vista["temas"], [])
         self.assertEqual(vista["organo"], "")
 
+    def test_dos_personas_entran_juntas(self):
+        import threading
+
+        codigo = "conc-" + uuid.uuid4().hex[:8]
+        errores = []
+
+        def entrar(n):
+            try:
+                aula.aplicar(codigo, {
+                    "client": "cliente-conc-{:04d}".format(n),
+                    "accion": "perfil",
+                    "nombre": "Persona {}".format(n),
+                    "funcion": "Rol",
+                })
+            except Exception as exc:
+                errores.append(exc)
+
+        hilos = [threading.Thread(target=entrar, args=(n,)) for n in range(3)]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join()
+        self.assertEqual(errores, [])
+        vista = aula.obtener(codigo, client="cliente-conc-0000")
+        self.assertEqual(vista["presentes"], 3)
+
+    def test_reintenta_si_la_escritura_choca(self):
+        codigo = "choque-" + uuid.uuid4().hex[:8]
+        real = aula._ALMACEN.escribir
+        llamadas = {"n": 0}
+
+        def choca_una_vez(data, marca=None):
+            llamadas["n"] += 1
+            if llamadas["n"] == 1:
+                raise aula._Conflicto()
+            return real(data, marca)
+
+        aula._ALMACEN.escribir = choca_una_vez
+        try:
+            vista = aula.aplicar(codigo, {
+                "client": "cliente-choque-0001",
+                "accion": "perfil",
+                "nombre": "Ana Pérez",
+                "funcion": "Secretaria",
+            })
+        finally:
+            aula._ALMACEN.escribir = real
+        self.assertGreaterEqual(llamadas["n"], 2)
+        self.assertTrue(vista["adentro"])
+        self.assertEqual(vista["presentes"], 1)
+
+    def test_fusion_no_pisa_a_la_otra_persona(self):
+        original = {"presentes": {}, "ocupantes": {}, "temas": [], "rev": 1, "organo": "", "cerrada": False, "cola": [], "turno": None}
+        editada = {
+            "presentes": {"ana": {"nombre": "Ana", "funcion": "Sec", "visto": 10, "camara": False}},
+            "ocupantes": {},
+            "temas": [],
+            "rev": 2,
+            "organo": "",
+            "cerrada": False,
+            "cola": [],
+            "turno": None,
+        }
+        fresca = {
+            "presentes": {"beto": {"nombre": "Beto", "funcion": "Decano", "visto": 12, "camara": True}},
+            "ocupantes": {"1": {"nombre": "Beto", "funcion": "Decano", "client": "beto", "visto": 12}},
+            "temas": ["Tema de Beto"],
+            "rev": 3,
+            "organo": "",
+            "cerrada": False,
+            "cola": [],
+            "turno": None,
+        }
+        sala = aula._fusionar_sala(original, editada, fresca)
+        self.assertIn("ana", sala["presentes"])
+        self.assertIn("beto", sala["presentes"])
+        self.assertEqual(sala["temas"], ["Tema de Beto"])
+
 
 if __name__ == "__main__":
     unittest.main()

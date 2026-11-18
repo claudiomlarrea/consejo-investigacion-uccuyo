@@ -86,9 +86,10 @@ async function enviar(accion, extra, reintento) {
     pintar();
     return true;
   } catch (err) {
-    if (!reintento && err.message && err.message.indexOf("Reintentá") !== -1) {
-      await cargarSala();
-      return enviar(accion, extra, true);
+    const intento = reintento || 0;
+    if (err.message && /reintent/i.test(err.message) && intento < 3) {
+      await new Promise((resolver) => setTimeout(resolver, 200 * (intento + 1)));
+      return enviar(accion, extra, intento + 1);
     }
     decir(err.message);
     if (accion === "agregar" || accion === "cargar") aviso(err.message, true);
