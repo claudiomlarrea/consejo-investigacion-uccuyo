@@ -151,57 +151,7 @@ function pintarSala() {
     palabra.classList.remove("is-on");
   }
 
-  const cont = $("asientos");
-  cont.replaceChildren();
-  sala.asientos.forEach((asiento, indice) => {
-    const total = sala.asientos.length;
-    const t = total === 1 ? 0.5 : indice / (total - 1);
-    const x = 8 + t * 84;
-    const y = 46 - Math.sin(t * Math.PI) * 18;
-    const boton = document.createElement("button");
-    boton.type = "button";
-    boton.className = "asiento"
-      + (asiento.nombre ? "" : " is-libre")
-      + (asiento.propio ? " is-mio" : "")
-      + (turno && turno.id === asiento.id ? " is-habla" : "");
-    boton.style.left = x + "%";
-    boton.style.top = y + "%";
-    boton.style.zIndex = String(Math.round(y));
-    const funcion = asiento.funcion || "";
-    const rotulo = asiento.nombre
-      ? (funcion ? funcion + ", " + asiento.nombre : asiento.nombre)
-      : "Libre";
-    boton.title = asiento.nombre
-      ? (sala.conduzco && !asiento.propio ? "Dar la palabra a " + asiento.nombre : rotulo)
-      : "Sentarme";
-    boton.setAttribute("aria-label", rotulo);
-
-    const cara = document.createElement("span");
-    cara.className = "cara";
-    if (asiento.cara && asiento.quien) {
-      const img = document.createElement("img");
-      img.alt = "";
-      img.src = "/api/aula/" + encodeURIComponent(state.sala)
-        + "/cara?client=" + encodeURIComponent(asiento.quien)
-        + "&v=" + Math.floor(Date.now() / 3000);
-      cara.append(img);
-    }
-    boton.append(cara);
-
-    const silla = document.createElement("span");
-    silla.className = "silla";
-    if (funcion) {
-      const cargo = document.createElement("strong");
-      cargo.textContent = funcion;
-      silla.append(cargo);
-    }
-    const quien = document.createElement("em");
-    quien.textContent = asiento.nombre || "Libre";
-    silla.append(quien);
-    boton.append(silla);
-    boton.addEventListener("click", () => clickAsiento(asiento));
-    cont.append(boton);
-  });
+  pintarAsientos(sala, turno);
 
   const cola = $("cola");
   cola.textContent = sala.cola.length
@@ -217,6 +167,103 @@ function pintarSala() {
   pintarPantalla(sala);
   pintarRoster(sala);
   pintarAgenda();
+}
+
+function pintarAsientos(sala, turno) {
+  const cont = $("asientos");
+  const video = $("mi-cara");
+  const ancla = $("mi-camara-video");
+  const presentes = new Set(sala.asientos.map((asiento) => String(asiento.id)));
+  [...cont.children].forEach((nodo) => {
+    if (!presentes.has(nodo.dataset.id)) nodo.remove();
+  });
+  const marca = Math.floor(Date.now() / 4000);
+  let videoEnAsiento = false;
+  sala.asientos.forEach((asiento, indice) => {
+    let boton = cont.querySelector('[data-id="' + asiento.id + '"]');
+    if (!boton) {
+      boton = document.createElement("button");
+      boton.type = "button";
+      boton.dataset.id = String(asiento.id);
+      const cara = document.createElement("span");
+      cara.className = "cara";
+      const mano = document.createElement("span");
+      mano.className = "mano";
+      mano.textContent = "✋";
+      mano.hidden = true;
+      cara.append(mano);
+      const silla = document.createElement("span");
+      silla.className = "silla";
+      const cargo = document.createElement("strong");
+      const quien = document.createElement("em");
+      silla.append(cargo, quien);
+      boton.append(cara, silla);
+      boton.addEventListener("click", () => clickAsiento(boton._asiento));
+      cont.append(boton);
+    }
+    boton._asiento = asiento;
+    const total = sala.asientos.length;
+    const t = total === 1 ? 0.5 : indice / (total - 1);
+    const x = 8 + t * 84;
+    const y = 54 - Math.sin(t * Math.PI) * 16;
+    const habla = Boolean(turno && turno.id === asiento.id);
+    const pide = habla || (sala.cola || []).some((persona) => persona.id === asiento.id);
+    const funcion = asiento.funcion || "";
+    boton.className = "asiento"
+      + (asiento.nombre ? "" : " is-libre")
+      + (asiento.propio ? " is-mio" : "")
+      + (habla ? " is-habla" : "")
+      + (pide ? " is-mano" : "");
+    boton.style.left = x + "%";
+    boton.style.top = y + "%";
+    boton.style.zIndex = String(Math.round(y));
+    const rotulo = asiento.nombre
+      ? (funcion ? funcion + ", " + asiento.nombre : asiento.nombre)
+      : "Libre";
+    boton.title = asiento.nombre
+      ? (sala.conduzco && !asiento.propio ? "Dar la palabra a " + asiento.nombre : rotulo)
+      : "Sentarme";
+    boton.setAttribute("aria-label", rotulo + (pide ? ", con la mano levantada" : ""));
+    const cara = boton.querySelector(".cara");
+    const mano = cara.querySelector(".mano");
+    mano.hidden = !pide;
+    const propiaEnVivo = Boolean(asiento.propio && state.camara && video);
+    if (propiaEnVivo) {
+      if (video.parentElement !== cara) cara.append(video);
+      video.hidden = false;
+      videoEnAsiento = true;
+    }
+    let img = cara.querySelector("img");
+    if (!propiaEnVivo && asiento.cara && asiento.quien) {
+      const src = "/api/aula/" + encodeURIComponent(state.sala)
+        + "/cara?client=" + encodeURIComponent(asiento.quien)
+        + "&v=" + marca;
+      if (!img) {
+        img = document.createElement("img");
+        img.alt = "";
+        cara.append(img);
+      }
+      if (img.dataset.src !== src) {
+        const previa = new Image();
+        previa.onload = () => {
+          if (img.dataset.pedido === src) {
+            img.src = previa.src;
+            img.dataset.src = src;
+          }
+        };
+        img.dataset.pedido = src;
+        previa.src = src;
+      }
+    } else if (img) {
+      img.remove();
+    }
+    const cargo = boton.querySelector("strong");
+    const quien = boton.querySelector("em");
+    cargo.textContent = funcion;
+    cargo.hidden = !funcion;
+    quien.textContent = asiento.nombre || "Libre";
+  });
+  if (!videoEnAsiento && video && ancla && video.parentElement !== ancla) ancla.append(video);
 }
 
 function pintarRoster(sala) {
@@ -480,14 +527,14 @@ async function apagarCamara() {
 
 function arrancarEnvioCara() {
   clearInterval(state.caraTimer);
-  state.caraTimer = setInterval(enviarCara, 3000);
+  state.caraTimer = setInterval(enviarCara, 4000);
   enviarCara();
 }
 
 async function enviarCara() {
   const video = $("mi-cara");
   if (!state.camara || !video || !video.videoWidth) return;
-  const ancho = 160;
+  const ancho = 280;
   const alto = Math.max(1, Math.round(video.videoHeight * (ancho / video.videoWidth)));
   const lienzo = enviarCara.lienzo || (enviarCara.lienzo = document.createElement("canvas"));
   lienzo.width = ancho;
@@ -498,7 +545,7 @@ async function enviarCara() {
   ctx.scale(-1, 1);
   ctx.drawImage(video, 0, 0, ancho, alto);
   ctx.restore();
-  const blob = await new Promise((resolver) => lienzo.toBlob(resolver, "image/jpeg", 0.6));
+  const blob = await new Promise((resolver) => lienzo.toBlob(resolver, "image/jpeg", 0.72));
   if (!blob || blob.size > 48000) return;
   try {
     await fetch(

@@ -160,12 +160,14 @@ img { display: block; }
   margin-top: 12px;
 }
 #mi-cara {
-  width: 160px;
-  height: 120px;
   object-fit: cover;
-  border-radius: 12px;
   background: #07182c;
   transform: scaleX(-1);
+}
+#mi-camara-video #mi-cara {
+  width: 240px;
+  height: 180px;
+  border-radius: 16px;
 }
 #mi-cara-ayuda { margin: 0; color: var(--muted); }
 
@@ -243,7 +245,7 @@ img { display: block; }
 
 .camara {
   position: relative;
-  height: 420px;
+  height: 520px;
   margin-top: 8px;
 }
 .piso {
@@ -272,7 +274,7 @@ img { display: block; }
 #asientos { position: absolute; inset: 0; }
 .asiento {
   position: absolute;
-  width: 92px;
+  width: 116px;
   transform: translate(-50%, -50%);
   border: 0;
   background: transparent;
@@ -282,16 +284,32 @@ img { display: block; }
 .cara {
   display: flex;
   justify-content: center;
-  height: 52px;
-  margin-bottom: 4px;
+  position: relative;
+  height: 124px;
+  margin-bottom: 6px;
 }
-.cara img, .cara video {
-  width: 48px;
-  height: 48px;
+.cara img, .cara video, .cara #mi-cara {
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
   object-fit: cover;
   background: #07182c;
-  border: 2px solid rgba(255, 255, 255, 0.28);
+  border: 3px solid rgba(255, 255, 255, 0.35);
+}
+.mano {
+  position: absolute;
+  z-index: 2;
+  top: -6px;
+  right: 0;
+  font-size: 1.85rem;
+  line-height: 1;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7));
+}
+.asiento.is-habla .cara img,
+.asiento.is-habla .cara video {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 4px rgba(234, 179, 8, 0.45);
 }
 .silla {
   display: flex;
@@ -384,8 +402,10 @@ img { display: block; }
 @media (max-width: 800px) {
   .barra { grid-template-areas: "marca marca" "acciones acciones" "vivo acta"; }
   .dock { grid-template-columns: 1fr; }
-  .camara { height: 460px; }
-  .asiento { width: 86px; }
+  .camara { height: 480px; }
+  .asiento { width: 92px; }
+  .cara { height: 80px; }
+  .cara img, .cara video, .cara #mi-cara { width: 76px; height: 76px; }
   .silla { height: 54px; }
   .silla em { font-size: 0.7rem; }
   .mesa { height: 90px; }
