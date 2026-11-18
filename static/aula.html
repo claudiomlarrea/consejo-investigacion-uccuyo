@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/aula.css?v=11">
+  <link rel="stylesheet" href="/static/aula.css?v=13">
 </head>
 <body data-acta="__ACTA__" data-sala="__SALA__" data-meet-project="__MEET_PROJECT__">
   <header class="barra">
@@ -18,7 +18,10 @@
         <small>UCCuyo · todas las unidades</small>
       </span>
     </a>
-    <p class="vivo" id="sync">Conectando la sala…</p>
+    <div class="barra-lado">
+      <button type="button" class="btn btn-fantasma" id="btn-copiar">Copiar enlace del aula</button>
+      <p class="vivo" id="sync">Conectando la sala…</p>
+    </div>
   </header>
 
   <section class="guia" id="guia">
@@ -30,7 +33,6 @@
         <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
       </label>
       <button type="submit" class="btn btn-oro" id="btn-entrar-aula">Entrar a la reunión</button>
-      <button type="button" class="btn btn-fantasma" id="btn-micro">Encender micrófono</button>
     </form>
     <div class="identidad">
       <label class="nombre">
@@ -43,8 +45,6 @@
       </label>
       <div class="dock-acciones">
         <button type="button" class="btn btn-oro" id="btn-entrar">Entrar y prender mi cámara</button>
-        <button type="button" class="btn btn-fantasma" id="btn-camara">Prender mi cámara</button>
-        <button type="button" class="btn btn-oro" id="btn-pantalla">Compartir pantalla</button>
       </div>
     </div>
     <div class="mi-camara" id="mi-camara">
@@ -94,9 +94,8 @@
         <video id="pantalla-local" autoplay playsinline muted hidden></video>
         <img id="pantalla-remota" alt="Pantalla compartida" hidden>
       </div>
-      <h1 id="agenda-titulo">Agregá los temas de esta reunión.</h1>
-      <p class="meta" id="agenda-meta">Los temas se escriben acá o se cargan desde un Word o un PDF.</p>
-      <p class="meta" id="agenda-aviso"></p>
+      <h1 id="agenda-titulo">Agregá los temas del orden del día.</h1>
+      <p class="meta" id="agenda-meta">Escribilos abajo o cargá un Word o un PDF. Aparecen en esta lista ahora, antes de comenzar la reunión.</p>
       <ol class="lista" id="agenda-lista"></ol>
       <div class="telon-nav">
         <button type="button" class="btn btn-fantasma" id="btn-anterior">Tema anterior</button>
@@ -110,6 +109,7 @@
           <input id="archivo-temas" type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
         </label>
         <button type="button" class="btn btn-oro" id="btn-archivo">Cargar temas</button>
+        <p class="aviso-tema" id="agenda-aviso" role="status"></p>
       </form>
     </section>
 
@@ -135,7 +135,37 @@
     </section>
   </main>
 
+  <nav class="barra-llamada" aria-label="Controles de la llamada">
+    <button type="button" class="llamada is-off" id="btn-micro" aria-pressed="false" aria-label="Micrófono apagado">
+      <span class="llamada-icono" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6 11a6 6 0 0 0 12 0"></path><path d="M12 17v3"></path></svg>
+        <span class="llamada-slash"></span>
+      </span>
+      <span class="llamada-texto">Micrófono apagado</span>
+    </button>
+    <button type="button" class="llamada is-off" id="btn-camara" aria-pressed="false" aria-label="Cámara apagada">
+      <span class="llamada-icono" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 8h4l2-2h6l2 2h4v11H3z"></path><circle cx="12" cy="13" r="3"></circle></svg>
+        <span class="llamada-slash"></span>
+      </span>
+      <span class="llamada-texto">Cámara apagada</span>
+    </button>
+    <button type="button" class="llamada" id="btn-pantalla" aria-pressed="false" aria-label="Compartir pantalla">
+      <span class="llamada-icono" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8"></path><path d="M12 16v4"></path></svg>
+      </span>
+      <span class="llamada-texto">Compartir pantalla</span>
+    </button>
+    <button type="button" class="llamada llamada-salir" id="btn-dejar" aria-label="Salir del aula">
+      <span class="llamada-icono" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M7 4h3l1 4-2 1a11 11 0 0 0 6 6l1-2 4 1v3a2 2 0 0 1-2 2A16 16 0 0 1 5 6a2 2 0 0 1 2-2z"></path></svg>
+      </span>
+      <span class="llamada-texto">Salir</span>
+    </button>
+  </nav>
+  <p class="toast" id="toast" role="status" hidden></p>
+
   <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
-  <script src="/static/aula.js?v=11"></script>
+  <script src="/static/aula.js?v=13"></script>
 </body>
 </html>

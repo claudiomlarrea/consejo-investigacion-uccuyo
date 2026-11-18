@@ -330,6 +330,61 @@ def temas_desde_texto(texto: str) -> List[str]:
     return vistos
 
 
+_RE_ITEM_OD = re.compile(r"^(\d+)\.\s+(.+?)\s+[-–—]\s+(.+)$")
+
+
+def _linea_od(texto: str) -> str:
+    return " ".join((texto or "").replace("\u00a0", " ").replace("\u2011", "-").split())
+
+
+def _titulos_de_items(temas: List[Dict[str, Any]]) -> List[str]:
+    titulos: List[str] = []
+    ya = set()
+    for tema in temas:
+        titulo = _linea_od(str(tema.get("titulo") or ""))
+        if not titulo:
+            continue
+        tipo = _linea_od(str(tema.get("tipo") or ""))
+        linea = (tipo + " — " + titulo) if tipo else titulo
+        clave = linea.casefold()
+        if clave in ya:
+            continue
+        ya.add(clave)
+        titulos.append(linea[:180].rstrip())
+        if len(titulos) >= 40:
+            break
+    return titulos
+
+
+def _titulos_linea_od(lineas: List[str]) -> List[str]:
+    temas = []
+    for linea in lineas:
+        item = _RE_ITEM_OD.match(_linea_od(linea))
+        if not item:
+            continue
+        temas.append({"tipo": item.group(2).strip(), "titulo": item.group(3).strip()})
+    return _titulos_de_items(temas)
+
+
+def _lineas_docx(contenido: bytes) -> List[str]:
+    from docx import Document
+
+    documento = Document(BytesIO(contenido))
+    lineas: List[str] = []
+    for parrafo in documento.paragraphs:
+        lineas.extend(parrafo.text.replace("\r", "\n").split("\n"))
+    for tabla in documento.tables:
+        for fila in tabla.rows:
+            vistos = set()
+            for celda in fila.cells:
+                texto = celda.text.strip()
+                if not texto or texto in vistos:
+                    continue
+                vistos.add(texto)
+                lineas.extend(texto.replace("\r", "\n").split("\n"))
+    return lineas
+
+
 def temas_desde_archivo(nombre: str, contenido: bytes) -> List[str]:
     bajo = (nombre or "").lower()
     if bajo.endswith(".doc") and not bajo.endswith(".docx"):
@@ -339,33 +394,19 @@ def temas_desde_archivo(nombre: str, contenido: bytes) -> List[str]:
     if bajo.endswith(".docx"):
         from word_docs import parsear_od_docx
 
-        oficiales = []
         try:
             oficiales = parsear_od_docx(contenido, 0, "")
         except Exception:
             oficiales = []
-        titulos = []
-        for tema in oficiales:
-            titulo = " ".join(str(tema.get("titulo") or "").split())
-            if not titulo:
-                continue
-            tipo = " ".join(str(tema.get("tipo") or "").split())
-            linea = (tipo + " — " + titulo) if tipo else titulo
-            titulos.append(linea[:180].rstrip())
-            if len(titulos) >= 40:
-                break
+        titulos = _titulos_de_items(oficiales)
+        if not titulos:
+            try:
+                titulos = _titulos_linea_od(_lineas_docx(contenido))
+            except Exception:
+                titulos = []
         if titulos:
             return titulos
-        from docx import Document
-
-        documento = Document(BytesIO(contenido))
-        lineas = [parrafo.text for parrafo in documento.paragraphs]
-        for tabla in documento.tables:
-            for fila in tabla.rows:
-                celdas = [celda.text.strip() for celda in fila.cells if celda.text.strip()]
-                if celdas:
-                    lineas.append(celdas[0])
-        temas = temas_desde_texto("\n".join(lineas))
+        temas = temas_desde_texto("\n".join(_lineas_docx(contenido)))
     elif bajo.endswith(".pdf"):
         from pypdf import PdfReader
 
@@ -373,11 +414,12 @@ def temas_desde_archivo(nombre: str, contenido: bytes) -> List[str]:
         if len(lector.pages) > 20:
             raise ValueError("El PDF tiene más de 20 páginas.")
         texto = "\n".join((pagina.extract_text() or "") for pagina in lector.pages)
-        temas = temas_desde_texto(texto)
+        titulos = _titulos_linea_od(texto.split("\n"))
+        temas = titulos or temas_desde_texto(texto)
     else:
         raise ValueError("Cargá un Word (.docx) o un PDF.")
     if not temas:
-        raise ValueError("No encontré temas en ese archivo. Cada tema tiene que ir en un renglón.")
+        raise ValueError("No encontré temas en ese archivo. Cada tema tiene que ir en un renglón, o usá el Word del orden del día.")
     return temas
 
 
@@ -422,7 +464,7 @@ async def api_aula_temas(
     archivo: UploadFile = File(...),
 ):
     if len(client) < 8:
-        raise HTTPException(400, "Entrá con tu nombre y tu función para cargar los temas.")
+        raise HTTPException(400, "Falta la identificación de este navegador.")
     try:
         titulos = temas_desde_archivo(archivo.filename or "", await archivo.read())
         cuerpo = {"client": client, "accion": "cargar", "titulos": titulos, "reemplazar": True}
