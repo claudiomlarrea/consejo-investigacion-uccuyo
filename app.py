@@ -13,11 +13,12 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import aula
 from catalogo import (
     ACTAS,
     CORREOS_ORDEN_UNIDADES,
@@ -99,6 +100,16 @@ class TemaIn(BaseModel):
     fuente: str = ""
     monto: str = ""
     escribir_en_sheets: bool = False
+
+
+class AulaIn(BaseModel):
+    client: str = Field(min_length=8, max_length=80)
+    accion: str
+    nombre: str = ""
+    asiento: Optional[int] = None
+    acta: Optional[int] = None
+    tema: Optional[int] = None
+    rev: Optional[int] = None
 
 
 class OrdenIn(BaseModel):
@@ -240,6 +251,70 @@ def _resumen_acta(numero: int) -> Dict[str, Any]:
         "drive_url": DRIVE.get(numero),
         "sheet_url": SHEET_URL,
     }
+
+
+def _html_aula(nombre: str) -> HTMLResponse:
+    html = (STATIC / nombre).read_text(encoding="utf-8")
+    numero = aula.sugerir_acta()
+    html = (
+        html.replace("__ACTA__", str(numero))
+        .replace("__SALA__", "consejo-{}".format(numero))
+        .replace("__MEET_PROJECT__", os.environ.get("MEET_CLOUD_PROJECT_NUMBER", ""))
+    )
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
+
+
+def _origen(request: Request) -> str:
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+    if proto and host:
+        return proto + "://" + host
+    return str(request.base_url).rstrip("/")
+
+
+@app.get("/aula")
+@app.get("/aula/escenario")
+def pagina_aula():
+    return _html_aula("aula.html")
+
+
+@app.get("/aula/panel")
+def pagina_panel():
+    return _html_aula("aula-panel.html")
+
+
+@app.get("/aula/manifest.json")
+def pagina_manifiesto(request: Request):
+    return aula.manifest(_origen(request))
+
+
+@app.get("/api/aula/codigo")
+def api_aula_codigo(texto: str = ""):
+    try:
+        codigo = aula.normalizar_codigo(texto)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"codigo": codigo, "meet_url": aula.enlace_meet(codigo)}
+
+
+@app.get("/api/aula/{codigo}")
+def api_aula_get(codigo: str, acta: Optional[int] = None, client: str = ""):
+    try:
+        return aula.obtener(codigo, acta, client)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except aula.AulaError as exc:
+        raise HTTPException(exc.status, exc.mensaje)
+
+
+@app.post("/api/aula/{codigo}")
+def api_aula_post(codigo: str, body: AulaIn):
+    try:
+        return aula.aplicar(codigo, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except aula.AulaError as exc:
+        raise HTTPException(exc.status, exc.mensaje)
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aula del Consejo · UCCuyo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/aula.css?v=2">
+</head>
+<body
+  data-acta="__ACTA__"
+  data-sala="__SALA__"
+  data-meet-project="__MEET_PROJECT__"
+>
+  <header class="barra">
+    <a class="marca" href="/">
+      <img src="/static/logo-uccuyo.png" width="42" height="42" alt="Universidad Católica de Cuyo">
+      <span>
+        <strong>Aula del Consejo</strong>
+        <small>Investigación · UCCuyo</small>
+      </span>
+    </a>
+    <label class="acta">
+      Acta
+      <select id="acta"></select>
+    </label>
+    <p class="vivo" id="sync">Conectando la sala…</p>
+    <div class="barra-acciones">
+      <button type="button" class="btn btn-oro" id="btn-meet-abrir">Abrir Meet</button>
+      <button type="button" class="btn btn-fantasma" id="btn-copiar">Copiar enlace del aula</button>
+    </div>
+  </header>
+
+  <p class="banner" id="banner">
+    <span>Meet sigue con la cámara y el micrófono. Esta aula es la sala compartida: asientos, turno de palabra y orden del día. Pegá el enlace de la reunión y pasá este enlace por el chat, o abrila en el escenario de Meet con el complemento.</span>
+    <button type="button" id="cerrar-banner" aria-label="Cerrar aviso">×</button>
+  </p>
+
+  <main>
+    <section class="telon" aria-live="polite">
+      <div class="telon-cabeza">
+        <p class="kicker" id="agenda-kicker">Orden del día</p>
+        <p class="palabra" id="palabra">Nadie tiene la palabra</p>
+      </div>
+      <h1 id="agenda-titulo">Cargando el acta…</h1>
+      <p class="meta" id="agenda-meta"></p>
+      <div class="telon-nav">
+        <button type="button" class="btn btn-fantasma" id="btn-anterior">Tema anterior</button>
+        <button type="button" class="btn btn-oro" id="btn-siguiente">Tema siguiente</button>
+      </div>
+      <ol class="lista" id="agenda-lista"></ol>
+    </section>
+
+    <section class="camara" aria-label="Hemiciclo del consejo">
+      <div class="piso" aria-hidden="true"></div>
+      <div class="mesa" aria-hidden="true"></div>
+      <div id="asientos"></div>
+    </section>
+  </main>
+
+  <footer class="dock">
+    <label class="nombre">
+      Tu nombre
+      <input id="nombre" maxlength="40" autocomplete="name" placeholder="Nombre y apellido">
+    </label>
+    <div class="dock-acciones">
+      <button type="button" class="btn btn-oro" id="btn-palabra">Pedir la palabra</button>
+      <button type="button" class="btn btn-fantasma" id="btn-conceder">Dar la palabra</button>
+      <button type="button" class="btn btn-fantasma" id="btn-ceder">Cedo la palabra</button>
+      <button type="button" class="btn btn-texto" id="btn-salir">Levantarme</button>
+    </div>
+    <p class="cola" id="cola"></p>
+    <form class="meet" id="form-meet">
+      <label>
+        Enlace de Google Meet
+        <input id="meet" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
+      </label>
+      <button type="submit" class="btn btn-fantasma">Unir esta reunión</button>
+    </form>
+    <p class="estado" id="estado" role="status"></p>
+  </footer>
+
+  <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
+  <script src="/static/aula.js?v=2"></script>
+</body>
+</html>

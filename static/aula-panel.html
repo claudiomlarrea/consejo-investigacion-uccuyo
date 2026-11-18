@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aula del Consejo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/aula.css?v=1">
+</head>
+<body class="panel" data-acta="__ACTA__" data-meet-project="__MEET_PROJECT__">
+  <header class="panel-marca">
+    <img src="/static/logo-uccuyo.png" width="40" height="40" alt="">
+    <div>
+      <strong>Aula del Consejo</strong>
+      <small>Se abre en el escenario de Meet</small>
+    </div>
+  </header>
+  <p class="panel-texto">La cámara y el micrófono quedan en Meet. El hemiciclo, el turno y el orden del día se comparten en el escenario.</p>
+  <label class="acta acta-panel">
+    Acta de esta reunión
+    <select id="acta"></select>
+  </label>
+  <button type="button" class="btn btn-oro btn-bloque" id="abrir">Abrir el aula</button>
+  <p class="estado" id="estado" role="status"></p>
+  <details class="pasos">
+    <summary>Cómo instalarlo en Meet</summary>
+    <ol>
+      <li>Publicá este sitio con HTTPS.</li>
+      <li>En Google Cloud, habilitá Google Workspace Marketplace SDK y Google Workspace add-ons API.</li>
+      <li>Creá un despliegue HTTP y pegá el manifiesto de <a id="link-manifiesto" href="/aula/manifest.json">/aula/manifest.json</a>.</li>
+      <li>En App configuration, elegí ese despliegue e instalalo.</li>
+      <li>Definí <code>MEET_CLOUD_PROJECT_NUMBER</code> con el número del proyecto.</li>
+      <li>En la reunión: Actividades → Aula del Consejo → Abrir el aula. El resto acepta unirse.</li>
+    </ol>
+    <p>Sin el complemento, abrí el aula en el navegador, pegá el enlace de Meet y compartí el enlace del aula por el chat.</p>
+  </details>
+  <script src="https://www.gstatic.com/meetjs/addons/1.1.0/meet.addons.js"></script>
+  <script src="/static/aula-panel.js?v=1"></script>
+</body>
+</html>

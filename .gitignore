@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 data/ensayos.json
+data/aula_salas.json
 secrets.toml
 *.pyc
 .DS_Store
