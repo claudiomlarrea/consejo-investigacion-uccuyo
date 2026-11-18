@@ -39,6 +39,7 @@ ORGANOS = {
     "consejo-directivo": "Consejo Directivo",
     "consejo-departamento": "Consejo de Departamento",
     "consejo-investigacion": "Consejo de Investigación",
+    "consejo-extension": "Consejo de Extensión",
     "facultad": "Facultad",
     "escuela": "Escuela",
     "departamento": "Departamento",
@@ -526,7 +527,7 @@ def _aplicar(sala: Dict[str, Any], body: Dict[str, Any]) -> bool:
         _exigir_adentro(sala, client)
         organo = str(body.get("organo") or "").strip()
         if organo not in ORGANOS:
-            raise AulaError(400, "Elegí el órgano: Consejo Superior, directivo, departamento, facultad, escuela o secretaría.")
+            raise AulaError(400, "Elegí el órgano: Consejo Superior, directivo, de extensión, departamento, facultad, escuela o secretaría.")
         sala["organo"] = organo
         sala["unidad"] = _limpiar_unidad(str(body.get("unidad") or ""))
         sala["acta"] = _limpiar_acta(str(body.get("acta") or ""))
