@@ -201,21 +201,49 @@ def _temas_acta(numero: int) -> List[Dict[str, Any]]:
     return temas
 
 
+def _fusionar_orden_unidades(
+    guardado: Optional[List[str]], presentes: List[str]
+) -> List[str]:
+    """Conserva el orden guardado y agrega al final las unidades nuevas del acta."""
+    presentes_cf = {u.casefold(): u for u in presentes}
+    orden = []  # type: List[str]
+    vistos = set()  # type: set
+    for u in guardado or []:
+        key = (u or "").strip().casefold()
+        if not key or key not in presentes_cf or key in vistos:
+            continue
+        orden.append(presentes_cf[key])
+        vistos.add(key)
+    for u in presentes:
+        key = u.casefold()
+        if key not in vistos:
+            orden.append(u)
+            vistos.add(key)
+    return orden
+
+
 def _obtener_orden_unidades(numero: int, temas: Optional[List[Dict[str, Any]]] = None) -> List[str]:
-    """Orden de bloques de unidad: memoria → planilla → aparición actual."""
-    if numero in _orden_unidades and _orden_unidades[numero]:
-        return list(_orden_unidades[numero])
-    info = estado_conexion()
-    if info["sheets_ok"]:
-        try:
-            guardado = leer_orden_unidades(numero)
-            if guardado:
-                _orden_unidades[numero] = list(guardado)
-                return list(guardado)
-        except Exception:
-            pass
+    """Orden de bloques: memoria/planilla + siempre todas las unidades con temas hoy."""
     base = temas if temas is not None else _temas_acta(numero)
-    return unidades_en_orden(aplicar_orden_od(base, _orden_manual.get(numero), None))
+    presentes = unidades_en_orden(aplicar_orden_od(base, _orden_manual.get(numero), None))
+    guardado = None  # type: Optional[List[str]]
+    if numero in _orden_unidades and _orden_unidades[numero]:
+        guardado = list(_orden_unidades[numero])
+    else:
+        info = estado_conexion()
+        if info["sheets_ok"]:
+            try:
+                leido = leer_orden_unidades(numero)
+                if leido:
+                    guardado = list(leido)
+                    _orden_unidades[numero] = list(leido)
+            except Exception:
+                pass
+    orden = _fusionar_orden_unidades(guardado, presentes)
+    # Mantener en memoria la lista completa (incluye unidades nuevas).
+    if orden:
+        _orden_unidades[numero] = list(orden)
+    return orden
 
 
 def _temas_ordenados(numero: int) -> List[Dict[str, Any]]:
@@ -774,25 +802,9 @@ def api_get_orden_unidades(numero: int):
     if numero not in ACTAS:
         raise HTTPException(404, "Acta inexistente")
     temas = _temas_acta(numero)
-    unidades = _obtener_orden_unidades(numero, temas)
-    # Solo unidades que realmente tienen temas, en el orden guardado + las nuevas al final.
-    presentes = unidades_en_orden(temas)
-    presentes_cf = {u.casefold(): u for u in presentes}
-    orden = []
-    vistos = set()
-    for u in unidades:
-        key = (u or "").casefold()
-        if key in presentes_cf and key not in vistos:
-            orden.append(presentes_cf[key])
-            vistos.add(key)
-    for u in presentes:
-        key = u.casefold()
-        if key not in vistos:
-            orden.append(u)
-            vistos.add(key)
     return {
         "ok": True,
-        "unidades": orden,
+        "unidades": _obtener_orden_unidades(numero, temas),
         "correos_orden_unidades": sorted(CORREOS_ORDEN_UNIDADES),
     }
 

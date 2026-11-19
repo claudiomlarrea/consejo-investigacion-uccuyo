@@ -367,9 +367,36 @@ async function elegirActa(numero, abrir) {
   const homeT = $("#home-acta-titulo");
   if (homeK) homeK.textContent = a.fecha;
   if (homeT) homeT.textContent = "Temas cargados · Acta " + a.numero + " · " + a.mes;
-  state.ordenUnidades = Array.isArray(state.detalle.orden_unidades)
+  // Siempre mostrar todas las unidades que tienen temas (orden guardado + nuevas al final).
+  const desdeApi = Array.isArray(state.detalle.orden_unidades)
     ? state.detalle.orden_unidades.slice()
     : [];
+  const desdeTemas = [];
+  const vistosU = new Set();
+  (state.detalle.temas || []).forEach((t) => {
+    const u = (t.unidad || "").trim();
+    const key = u.toLowerCase();
+    if (!u || vistosU.has(key)) return;
+    vistosU.add(key);
+    desdeTemas.push(u);
+  });
+  const orden = [];
+  const usados = new Set();
+  desdeApi.forEach((u) => {
+    const key = String(u || "").trim().toLowerCase();
+    if (!key || !vistosU.has(key) || usados.has(key)) return;
+    const canon = desdeTemas.find((x) => x.toLowerCase() === key) || u;
+    orden.push(canon);
+    usados.add(key);
+  });
+  desdeTemas.forEach((u) => {
+    const key = u.toLowerCase();
+    if (!usados.has(key)) {
+      orden.push(u);
+      usados.add(key);
+    }
+  });
+  state.ordenUnidades = orden;
   if (Array.isArray(state.detalle.correos_orden_unidades) && state.detalle.correos_orden_unidades.length) {
     state.correosOrdenUnidades = state.detalle.correos_orden_unidades.slice();
   }
