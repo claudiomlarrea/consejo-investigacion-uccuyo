@@ -434,20 +434,29 @@ function renderPanelOrdenUnidades() {
   const btnUnlock = $("#btn-desbloquear-unidades");
   const btnChange = $("#btn-cambiar-correo-unidades");
   const emailInput = $("#email-secretaria");
-  // El campo de correo siempre queda visible para poder probar otro autorizado.
+  const emailLabel = desbloqueo ? desbloqueo.querySelector("label") : null;
+  const ayuda = $("#orden-unidades-ayuda");
   if (desbloqueo) desbloqueo.classList.remove("hidden");
-  if (btnUnlock) btnUnlock.classList.toggle("hidden", unlocked);
-  if (btnChange) btnChange.classList.toggle("hidden", !unlocked);
+  // Si ya hay sesión: ocultar el formulario de desbloqueo; solo estado + cambiar correo.
+  if (emailLabel) emailLabel.classList.toggle("hidden", unlocked);
   if (emailInput) {
-    emailInput.readOnly = unlocked;
-    if (state.emailSecretaria && (!emailInput.value || unlocked)) {
+    emailInput.classList.toggle("hidden", unlocked);
+    emailInput.readOnly = false;
+    if (!unlocked && state.emailSecretaria && !emailInput.value) {
       emailInput.value = state.emailSecretaria;
     }
+  }
+  if (btnUnlock) btnUnlock.classList.toggle("hidden", unlocked);
+  if (btnChange) btnChange.classList.toggle("hidden", !unlocked);
+  if (ayuda) {
+    ayuda.textContent = unlocked
+      ? "Podés subir o bajar unidades con las flechas. El orden queda guardado en la planilla."
+      : "Solo Secretaría puede cambiar el orden de las unidades. Los consejeros siguen reordenando temas dentro de su unidad con las flechas ↑↓.";
   }
   if (activa) {
     activa.classList.toggle("hidden", !unlocked);
     activa.textContent = unlocked
-      ? "Orden de unidades desbloqueado para " + state.emailSecretaria
+      ? "Sesión activa: " + state.emailSecretaria
       : "";
   }
   const lista = $("#lista-orden-unidades");
